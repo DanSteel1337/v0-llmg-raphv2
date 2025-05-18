@@ -69,8 +69,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  const contextValue = { user, isLoading, signIn, signUp, signOut }
+  // Create a separate variable for the context value
+  const contextValue = {
+    user,
+    isLoading,
+    signIn,
+    signUp,
+    signOut,
+  }
 
+  // Use the variable in JSX
   return <AuthContext.Provider value={contextValue}>{children}</AuthContext.Provider>
 }
 

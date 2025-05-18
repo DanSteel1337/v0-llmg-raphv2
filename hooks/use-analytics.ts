@@ -46,7 +46,7 @@ export function useAnalytics(userId: string) {
 
   const logEvent = async (eventType: string, eventData: any) => {
     try {
-      await fetch("/api/analytics", {
+      const response = await fetch("/api/analytics", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -57,6 +57,12 @@ export function useAnalytics(userId: string) {
           userId,
         }),
       })
+
+      if (!response.ok) {
+        throw new Error("Failed to log analytics event")
+      }
+
+      await response.json()
     } catch (err) {
       console.error("Error logging analytics event:", err)
     }
