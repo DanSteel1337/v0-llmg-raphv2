@@ -1,8 +1,8 @@
-// Info: This file implements the Singleton pattern for Pinecone client to prevent multiple instances
+// Info: Singleton client for Pinecone
 import { Pinecone } from "@pinecone-database/pinecone"
 import type { Index } from "@pinecone-database/pinecone"
 
-// Singleton instances - declared outside of functions to ensure they're truly singletons
+// Singleton instances
 let pineconeClient: Pinecone | null = null
 let pineconeIndex: Index | null = null
 
