@@ -1,21 +1,29 @@
+// Info: This file implements settings API endpoints using Pinecone for storage
 import { NextResponse } from "next/server"
-import { getSupabaseServerClient } from "@/lib/supabase-client"
+import { getPineconeIndex } from "@/lib/pinecone-client"
+import { v4 as uuidv4 } from "uuid"
 
 export async function GET(request: Request) {
   try {
-    const supabase = getSupabaseServerClient()
+    // Use Pinecone for settings storage
+    const pineconeIndex = getPineconeIndex()
 
-    const { data, error } = await supabase.from("system_settings").select("*")
-
-    if (error) {
-      console.error("Error fetching settings:", error)
-      return NextResponse.json({ error: "Failed to fetch settings" }, { status: 500 })
-    }
+    // Query all settings
+    const queryResponse = await pineconeIndex.query({
+      vector: new Array(1536).fill(0), // Placeholder vector
+      topK: 100,
+      includeMetadata: true,
+      filter: {
+        record_type: { $eq: "setting" },
+      },
+    })
 
     // Convert array to object with key as the key
-    const settings = data.reduce(
+    const settings = queryResponse.matches.reduce(
       (acc, setting) => {
-        acc[setting.key] = setting.value
+        if (setting.metadata?.key) {
+          acc[setting.metadata.key as string] = setting.metadata.value
+        }
         return acc
       },
       {} as Record<string, any>,
@@ -36,59 +44,71 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Key and value are required" }, { status: 400 })
     }
 
-    const supabase = getSupabaseServerClient()
+    // Use Pinecone for settings storage
+    const pineconeIndex = getPineconeIndex()
 
     // Check if setting exists
-    const { data: existingData, error: existingError } = await supabase
-      .from("system_settings")
-      .select("*")
-      .eq("key", key)
-      .maybeSingle()
+    const queryResponse = await pineconeIndex.query({
+      vector: new Array(1536).fill(0), // Placeholder vector
+      topK: 1,
+      includeMetadata: true,
+      filter: {
+        key: { $eq: key },
+        record_type: { $eq: "setting" },
+      },
+    })
 
-    if (existingError) {
-      console.error("Error checking existing setting:", existingError)
-      return NextResponse.json({ error: "Failed to check existing setting" }, { status: 500 })
-    }
+    const existingData = queryResponse.matches.length > 0 ? queryResponse.matches[0] : null
 
-    let result
+    let settingId
 
     if (existingData) {
       // Update existing setting
-      const { data, error } = await supabase
-        .from("system_settings")
-        .update({
-          value,
-          description: description || existingData.description,
-        })
-        .eq("key", key)
-        .select()
+      settingId = existingData.id
 
-      if (error) {
-        console.error("Error updating setting:", error)
-        return NextResponse.json({ error: "Failed to update setting" }, { status: 500 })
-      }
-
-      result = data[0]
+      await pineconeIndex.upsert([
+        {
+          id: settingId,
+          values: new Array(1536).fill(0), // Placeholder vector
+          metadata: {
+            key,
+            value,
+            description: description || existingData.metadata?.description,
+            record_type: "setting",
+            updated_at: new Date().toISOString(),
+          },
+        },
+      ])
     } else {
       // Create new setting
-      const { data, error } = await supabase
-        .from("system_settings")
-        .insert({
-          key,
-          value,
-          description,
-        })
-        .select()
+      settingId = uuidv4()
 
-      if (error) {
-        console.error("Error creating setting:", error)
-        return NextResponse.json({ error: "Failed to create setting" }, { status: 500 })
-      }
-
-      result = data[0]
+      await pineconeIndex.upsert([
+        {
+          id: settingId,
+          values: new Array(1536).fill(0), // Placeholder vector
+          metadata: {
+            key,
+            value,
+            description,
+            record_type: "setting",
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+        },
+      ])
     }
 
-    return NextResponse.json({ setting: result })
+    // Return the setting
+    const setting = {
+      id: settingId,
+      key,
+      value,
+      description,
+      updated_at: new Date().toISOString(),
+    }
+
+    return NextResponse.json({ setting })
   } catch (error) {
     console.error("Unexpected error:", error)
     return NextResponse.json({ error: "An unexpected error occurred" }, { status: 500 })

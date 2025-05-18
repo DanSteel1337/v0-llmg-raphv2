@@ -1,27 +1,26 @@
-import { createClient } from "@supabase/supabase-js"
+import { createPagesBrowserClient } from "@supabase/auth-helpers-nextjs"
+import { createServerClient } from "@supabase/auth-helpers-nextjs"
+import { cookies } from "next/headers"
 
-// Create a single supabase client for the browser
-const createBrowserClient = () => {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL as string
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string
-
-  return createClient(supabaseUrl, supabaseAnonKey)
-}
-
-// Singleton pattern to avoid multiple instances
-let browserClient: ReturnType<typeof createClient> | null = null
-
+// Use this function in client components
 export const getSupabaseBrowserClient = () => {
-  if (!browserClient) {
-    browserClient = createBrowserClient()
-  }
-  return browserClient
+  return createPagesBrowserClient()
 }
 
-// Server-side client (for API routes)
+// Use this function in server components
 export const getSupabaseServerClient = () => {
-  const supabaseUrl = process.env.SUPABASE_URL as string
-  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY as string
-
-  return createClient(supabaseUrl, supabaseServiceKey)
+  const cookieStore = cookies()
+  return createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
+    cookies: {
+      get(name: string) {
+        return cookieStore.get(name)?.value
+      },
+      set(name: string, value: string, options: any) {
+        cookieStore.set({ name, value, ...options })
+      },
+      remove(name: string, options: any) {
+        cookieStore.delete({ name, ...options })
+      },
+    },
+  })
 }

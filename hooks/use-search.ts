@@ -1,3 +1,4 @@
+// Info: This hook implements search using API routes that use Pinecone for storage and search
 "use client"
 
 import { useState } from "react"

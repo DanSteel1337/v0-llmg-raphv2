@@ -1,7 +1,9 @@
+// Info: This file implements search API endpoints using Pinecone for vector search
 import { NextResponse } from "next/server"
-import { getSupabaseServerClient } from "@/lib/supabase-client"
+import { getPineconeIndex } from "@/lib/pinecone-client"
 import { openai } from "@ai-sdk/openai"
 import { embed } from "ai"
+import { v4 as uuidv4 } from "uuid"
 
 export async function POST(request: Request) {
   try {
@@ -11,15 +13,24 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Query is required" }, { status: 400 })
     }
 
-    const supabase = getSupabaseServerClient()
+    // Use Pinecone for search and logging
+    const pineconeIndex = getPineconeIndex()
 
-    // Log the search query
-    await supabase.from("search_history").insert({
-      user_id: userId,
-      query,
-      search_type: type || "semantic",
-      filters: { documentTypes, sortBy, dateRange },
-    })
+    // Log the search query in Pinecone
+    await pineconeIndex.upsert([
+      {
+        id: uuidv4(),
+        values: new Array(1536).fill(0), // Placeholder vector
+        metadata: {
+          user_id: userId,
+          query,
+          search_type: type || "semantic",
+          filters: JSON.stringify({ documentTypes, sortBy, dateRange }),
+          record_type: "search_history",
+          created_at: new Date().toISOString(),
+        },
+      },
+    ])
 
     // For semantic search, we need to generate an embedding
     if (type === "semantic" || type === "hybrid") {
@@ -30,40 +41,39 @@ export async function POST(request: Request) {
           value: query,
         })
 
-        // Get vector search settings
-        const { data: settingsData } = await supabase
-          .from("system_settings")
-          .select("value")
-          .eq("key", "vector_search")
-          .single()
-
-        const vectorSettings = settingsData?.value || {
-          match_threshold: 0.78,
-          match_count: 5,
+        // Build filter based on document types if provided
+        const filter: any = {
+          user_id: { $eq: userId },
+          record_type: { $eq: "chunk" },
         }
 
-        // Perform vector similarity search
-        const { data: vectorResults, error: vectorError } = await supabase.rpc("match_documents", {
-          query_embedding: embedding,
-          match_threshold: vectorSettings.match_threshold,
-          match_count: vectorSettings.match_count,
+        if (documentTypes && documentTypes.length > 0) {
+          filter.document_type = { $in: documentTypes }
+        }
+
+        // Perform vector similarity search in Pinecone
+        const queryResponse = await pineconeIndex.query({
+          vector: embedding,
+          topK: 10,
+          includeMetadata: true,
+          filter,
         })
 
-        if (vectorError) {
-          console.error("Vector search error:", vectorError)
-          return NextResponse.json({ error: "Vector search failed" }, { status: 500 })
-        }
-
         // Format results
-        const results = vectorResults.map((result) => ({
-          id: result.id,
-          title: result.content.substring(0, 50) + "...",
-          content: result.content,
-          documentName: result.document_name,
-          documentType: result.document_name.split(".").pop()?.toUpperCase() || "UNKNOWN",
-          date: new Date().toISOString().split("T")[0], // This would come from the document in a real implementation
-          relevance: result.similarity,
-          highlights: [`...${result.content.substring(0, 150)}...`, `...${result.content.substring(150, 300)}...`],
+        const results = queryResponse.matches.map((match) => ({
+          id: match.id,
+          title: (match.metadata?.content as string)?.substring(0, 50) + "...",
+          content: match.metadata?.content || "",
+          documentName: match.metadata?.document_name || "Unknown Document",
+          documentType: match.metadata?.document_type || "UNKNOWN",
+          date: match.metadata?.created_at
+            ? new Date(match.metadata.created_at as string).toISOString().split("T")[0]
+            : new Date().toISOString().split("T")[0],
+          relevance: match.score || 0,
+          highlights: [
+            `...${(match.metadata?.content as string)?.substring(0, 150)}...`,
+            `...${(match.metadata?.content as string)?.substring(150, 300)}...`,
+          ],
         }))
 
         return NextResponse.json({ results })
@@ -72,28 +82,60 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "Failed to generate embedding" }, { status: 500 })
       }
     } else {
-      // Keyword search (simplified implementation)
-      const { data: chunks, error: chunksError } = await supabase
-        .from("document_chunks")
-        .select("id, content, document_id, documents(name)")
-        .textSearch("content", query)
-        .limit(10)
+      // Keyword search - more complex in Pinecone without full-text search
+      // We'll need to implement a simple keyword matching algorithm
 
-      if (chunksError) {
-        console.error("Keyword search error:", chunksError)
-        return NextResponse.json({ error: "Keyword search failed" }, { status: 500 })
-      }
+      // Get all chunks for this user
+      const queryResponse = await pineconeIndex.query({
+        vector: new Array(1536).fill(0), // Placeholder vector
+        topK: 100,
+        includeMetadata: true,
+        filter: {
+          user_id: { $eq: userId },
+          record_type: { $eq: "chunk" },
+        },
+      })
+
+      // Filter chunks that contain the query keywords
+      const keywords = query.toLowerCase().split(/\s+/)
+      const filteredChunks = queryResponse.matches.filter((match) => {
+        const content = ((match.metadata?.content as string) || "").toLowerCase()
+        return keywords.some((keyword) => content.includes(keyword))
+      })
+
+      // Sort by keyword frequency (simple relevance)
+      filteredChunks.sort((a, b) => {
+        const contentA = ((a.metadata?.content as string) || "").toLowerCase()
+        const contentB = ((b.metadata?.content as string) || "").toLowerCase()
+
+        const scoreA = keywords.reduce((count, keyword) => {
+          const regex = new RegExp(keyword, "g")
+          return count + (contentA.match(regex) || []).length
+        }, 0)
+
+        const scoreB = keywords.reduce((count, keyword) => {
+          const regex = new RegExp(keyword, "g")
+          return count + (contentB.match(regex) || []).length
+        }, 0)
+
+        return scoreB - scoreA
+      })
 
       // Format results
-      const results = chunks.map((chunk) => ({
-        id: chunk.id,
-        title: chunk.content.substring(0, 50) + "...",
-        content: chunk.content,
-        documentName: chunk.documents?.name || "Unknown Document",
-        documentType: chunk.documents?.name.split(".").pop()?.toUpperCase() || "UNKNOWN",
-        date: new Date().toISOString().split("T")[0], // This would come from the document in a real implementation
+      const results = filteredChunks.slice(0, 10).map((match) => ({
+        id: match.id,
+        title: (match.metadata?.content as string)?.substring(0, 50) + "...",
+        content: match.metadata?.content || "",
+        documentName: match.metadata?.document_name || "Unknown Document",
+        documentType: match.metadata?.document_type || "UNKNOWN",
+        date: match.metadata?.created_at
+          ? new Date(match.metadata.created_at as string).toISOString().split("T")[0]
+          : new Date().toISOString().split("T")[0],
         relevance: 0.8, // Placeholder for keyword search
-        highlights: [`...${chunk.content.substring(0, 150)}...`, `...${chunk.content.substring(150, 300)}...`],
+        highlights: [
+          `...${(match.metadata?.content as string)?.substring(0, 150)}...`,
+          `...${(match.metadata?.content as string)?.substring(150, 300)}...`,
+        ],
       }))
 
       return NextResponse.json({ results })

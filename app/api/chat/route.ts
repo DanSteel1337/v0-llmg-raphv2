@@ -1,7 +1,9 @@
+// Info: This file implements chat API endpoints using Pinecone for storage and context retrieval
 import { NextResponse } from "next/server"
-import { getSupabaseServerClient } from "@/lib/supabase-client"
+import { getPineconeIndex } from "@/lib/pinecone-client"
 import { openai } from "@ai-sdk/openai"
 import { embed, generateText } from "ai"
+import { v4 as uuidv4 } from "uuid"
 
 export async function POST(request: Request) {
   try {
@@ -17,44 +19,75 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Last message must be from user" }, { status: 400 })
     }
 
-    const supabase = getSupabaseServerClient()
+    // Use Pinecone for chat storage and retrieval
+    const pineconeIndex = getPineconeIndex()
 
     // Create or get conversation
     let conversation
+    let newConversationId = conversationId
 
     if (conversationId) {
-      const { data, error } = await supabase.from("chat_conversations").select("*").eq("id", conversationId).single()
+      // Get existing conversation
+      const queryResponse = await pineconeIndex.query({
+        vector: new Array(1536).fill(0), // Placeholder vector
+        topK: 1,
+        includeMetadata: true,
+        filter: {
+          id: { $eq: conversationId },
+          record_type: { $eq: "conversation" },
+        },
+      })
 
-      if (error) {
-        console.error("Error fetching conversation:", error)
-        return NextResponse.json({ error: "Failed to fetch conversation" }, { status: 500 })
+      if (queryResponse.matches.length === 0) {
+        return NextResponse.json({ error: "Conversation not found" }, { status: 404 })
       }
 
-      conversation = data
+      conversation = {
+        id: queryResponse.matches[0].id,
+        ...queryResponse.matches[0].metadata,
+      }
     } else {
       // Create a new conversation
-      const { data, error } = await supabase
-        .from("chat_conversations")
-        .insert({
-          user_id: userId,
-          title: userMessage.content.substring(0, 50) + "...",
-        })
-        .select()
+      newConversationId = uuidv4()
 
-      if (error) {
-        console.error("Error creating conversation:", error)
-        return NextResponse.json({ error: "Failed to create conversation" }, { status: 500 })
+      await pineconeIndex.upsert([
+        {
+          id: newConversationId,
+          values: new Array(1536).fill(0), // Placeholder vector
+          metadata: {
+            user_id: userId,
+            title: userMessage.content.substring(0, 50) + "...",
+            record_type: "conversation",
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+        },
+      ])
+
+      conversation = {
+        id: newConversationId,
+        user_id: userId,
+        title: userMessage.content.substring(0, 50) + "...",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       }
-
-      conversation = data[0]
     }
 
     // Save user message
-    await supabase.from("chat_messages").insert({
-      conversation_id: conversation.id,
-      role: "user",
-      content: userMessage.content,
-    })
+    const userMessageId = uuidv4()
+    await pineconeIndex.upsert([
+      {
+        id: userMessageId,
+        values: new Array(1536).fill(0), // Placeholder vector
+        metadata: {
+          conversation_id: conversation.id,
+          role: "user",
+          content: userMessage.content,
+          record_type: "message",
+          created_at: new Date().toISOString(),
+        },
+      },
+    ])
 
     // Generate embedding for the query
     const { embedding } = await embed({
@@ -62,45 +95,58 @@ export async function POST(request: Request) {
       value: userMessage.content,
     })
 
-    // Get vector search settings
-    const { data: settingsData } = await supabase
-      .from("system_settings")
-      .select("value")
-      .eq("key", "vector_search")
-      .single()
-
-    const vectorSettings = settingsData?.value || {
-      match_threshold: 0.78,
-      match_count: 5,
-    }
-
-    // Perform vector similarity search
-    const { data: vectorResults, error: vectorError } = await supabase.rpc("match_documents", {
-      query_embedding: embedding,
-      match_threshold: vectorSettings.match_threshold,
-      match_count: vectorSettings.match_count,
+    // Get vector search settings from Pinecone
+    const settingsResponse = await pineconeIndex.query({
+      vector: new Array(1536).fill(0), // Placeholder vector
+      topK: 1,
+      includeMetadata: true,
+      filter: {
+        key: { $eq: "vector_search" },
+        record_type: { $eq: "setting" },
+      },
     })
 
-    if (vectorError) {
-      console.error("Vector search error:", vectorError)
-      return NextResponse.json({ error: "Vector search failed" }, { status: 500 })
-    }
+    const vectorSettings =
+      settingsResponse.matches.length > 0
+        ? settingsResponse.matches[0].metadata?.value
+        : {
+            match_threshold: 0.78,
+            match_count: 5,
+          }
+
+    // Perform vector similarity search for context
+    const vectorResults = await pineconeIndex.query({
+      vector: embedding,
+      topK: vectorSettings.match_count || 5,
+      includeMetadata: true,
+      filter: {
+        user_id: { $eq: userId },
+        record_type: { $eq: "chunk" },
+      },
+    })
 
     // Prepare context from search results
-    const context = vectorResults.map((result) => result.content).join("\n\n")
+    const context = vectorResults.matches.map((result) => result.metadata?.content || "").join("\n\n")
 
     // Get completion model settings
-    const { data: modelSettingsData } = await supabase
-      .from("system_settings")
-      .select("value")
-      .eq("key", "completion_model")
-      .single()
+    const modelSettingsResponse = await pineconeIndex.query({
+      vector: new Array(1536).fill(0), // Placeholder vector
+      topK: 1,
+      includeMetadata: true,
+      filter: {
+        key: { $eq: "completion_model" },
+        record_type: { $eq: "setting" },
+      },
+    })
 
-    const modelSettings = modelSettingsData?.value || {
-      name: "gpt-4o",
-      temperature: 0.2,
-      max_tokens: 1024,
-    }
+    const modelSettings =
+      modelSettingsResponse.matches.length > 0
+        ? modelSettingsResponse.matches[0].metadata?.value
+        : {
+            name: "gpt-4o",
+            temperature: 0.2,
+            max_tokens: 1024,
+          }
 
     // Adjust temperature based on response length
     const temperature = responseLength === 1 ? 0.1 : responseLength === 3 ? 0.3 : 0.2
@@ -123,31 +169,32 @@ export async function POST(request: Request) {
     })
 
     // Prepare citations
-    const citations = vectorResults.slice(0, 3).map((result, index) => ({
+    const citations = vectorResults.matches.slice(0, 3).map((result, index) => ({
       id: `citation-${index + 1}`,
-      text: result.content.substring(0, 100) + "...",
-      document: result.document_name,
+      text: (result.metadata?.content as string)?.substring(0, 100) + "...",
+      document: result.metadata?.document_name || "Unknown Document",
       page: Math.floor(Math.random() * 50) + 1, // This would be real page numbers in a production system
     }))
 
     // Save assistant message
-    const { data: messageData, error: messageError } = await supabase
-      .from("chat_messages")
-      .insert({
-        conversation_id: conversation.id,
-        role: "assistant",
-        content: text,
-        citations: citations,
-      })
-      .select()
-
-    if (messageError) {
-      console.error("Error saving assistant message:", messageError)
-      return NextResponse.json({ error: "Failed to save assistant message" }, { status: 500 })
-    }
+    const assistantMessageId = uuidv4()
+    await pineconeIndex.upsert([
+      {
+        id: assistantMessageId,
+        values: new Array(1536).fill(0), // Placeholder vector
+        metadata: {
+          conversation_id: conversation.id,
+          role: "assistant",
+          content: text,
+          citations: JSON.stringify(citations),
+          record_type: "message",
+          created_at: new Date().toISOString(),
+        },
+      },
+    ])
 
     return NextResponse.json({
-      id: messageData[0].id,
+      id: assistantMessageId,
       role: "assistant",
       content: text,
       citations,

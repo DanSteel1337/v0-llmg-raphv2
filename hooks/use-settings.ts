@@ -1,3 +1,4 @@
+// Info: This hook implements settings using API routes that use Pinecone for storage
 "use client"
 
 import { useState, useEffect } from "react"

@@ -1,3 +1,4 @@
+// Info: This hook implements document management using API routes that use Pinecone for storage
 "use client"
 
 import { useState, useEffect } from "react"
@@ -45,7 +46,7 @@ export function useDocuments(userId: string) {
 
   const uploadDocument = async (file: File, description?: string) => {
     try {
-      // First, upload the file to Supabase Storage
+      // Use the singleton Supabase client for file storage only
       const supabase = getSupabaseBrowserClient()
 
       const fileName = `${Date.now()}-${file.name}`
@@ -57,7 +58,7 @@ export function useDocuments(userId: string) {
         throw new Error(`File upload failed: ${uploadError.message}`)
       }
 
-      // Then, create a document record
+      // Then, create a document record in Pinecone via API
       const response = await fetch("/api/documents", {
         method: "POST",
         headers: {

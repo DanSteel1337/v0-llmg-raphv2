@@ -1,3 +1,4 @@
+// Info: This hook implements RAG chat using API routes that use Pinecone for storage and context retrieval
 "use client"
 
 import { useState, useEffect } from "react"
