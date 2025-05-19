@@ -1,19 +1,3 @@
-/**
- * Document Service
- *
- * Handles document functionality including:
- * - Document management (create, read, update, delete)
- * - Document processing and chunking
- * - Vector storage for document chunks
- *
- * Dependencies:
- * - @/lib/pinecone-rest-client.ts for vector storage and retrieval
- * - @/lib/embedding-service.ts for embeddings
- * - @/lib/chunking-utils.ts for document chunking
- * - uuid for ID generation
- */
-
-import { v4 as uuidv4 } from "uuid"
 import { upsertVectors, queryVectors, deleteVectors } from "@/lib/pinecone-rest-client"
 import { generateEmbedding } from "@/lib/embedding-service"
 import { chunkDocument } from "@/lib/chunking-utils"
@@ -34,7 +18,9 @@ export async function createDocument(
   fileSize?: number,
   filePath?: string,
 ): Promise<Document> {
-  const documentId = uuidv4()
+  const timestamp = Date.now()
+  const random = Math.floor(Math.random() * 10000)
+  const documentId = `doc_${timestamp}_${random}`
   const now = new Date().toISOString()
 
   const document: Document = {
@@ -57,7 +43,7 @@ export async function createDocument(
 
   await upsertVectors([
     {
-      id: documentId,
+      id: `meta_${documentId}`,
       values: zeroVector, // Zero vector with correct dimension
       metadata: {
         ...document,
@@ -368,25 +354,27 @@ export async function processDocument({
     )
 
     // 3. Generate embeddings and store in Pinecone
-    const BATCH_SIZE = 20
+    const EMBEDDING_BATCH_SIZE = 20
+    const UPSERT_BATCH_SIZE = 100
     let successfulEmbeddings = 0
     let failedEmbeddings = 0
     let totalVectorsInserted = 0
 
-    for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
-      const batch = chunks.slice(i, i + BATCH_SIZE)
+    // Process chunks in batches for embedding generation
+    for (let i = 0; i < chunks.length; i += EMBEDDING_BATCH_SIZE) {
+      const batch = chunks.slice(i, i + EMBEDDING_BATCH_SIZE)
       const batchProgress = Math.floor(40 + (i / chunks.length) * 50)
 
       await updateDocumentStatus(
         documentId,
         "processing",
         batchProgress,
-        `Processing batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(chunks.length / BATCH_SIZE)}`,
+        `Processing batch ${Math.floor(i / EMBEDDING_BATCH_SIZE) + 1}/${Math.ceil(chunks.length / EMBEDDING_BATCH_SIZE)}`,
       )
 
       console.log(`Processing document: Generating embeddings for batch`, {
         documentId,
-        batchNumber: Math.floor(i / BATCH_SIZE) + 1,
+        batchNumber: Math.floor(i / EMBEDDING_BATCH_SIZE) + 1,
         batchSize: batch.length,
         progress: `${batchProgress}%`,
       })
@@ -416,7 +404,7 @@ export async function processDocument({
 
           successfulEmbeddings++
           return {
-            id: uuidv4(),
+            id: `chunk_${documentId}_${i + index}`,
             values: embedding,
             metadata: {
               content: chunk,
@@ -447,35 +435,42 @@ export async function processDocument({
       const embeddings = embeddingResults.filter((result) => result !== null) as any[]
 
       if (embeddings.length > 0) {
-        // Store embeddings in Pinecone
-        console.log(`Processing document: Upserting vectors to Pinecone`, {
-          documentId,
-          batchNumber: Math.floor(i / BATCH_SIZE) + 1,
-          vectorCount: embeddings.length,
-        })
+        // Store embeddings in Pinecone in batches of 100
+        for (let j = 0; j < embeddings.length; j += UPSERT_BATCH_SIZE) {
+          const upsertBatch = embeddings.slice(j, j + UPSERT_BATCH_SIZE)
 
-        try {
-          const upsertResult = await upsertVectors(embeddings)
-          totalVectorsInserted += embeddings.length
+          console.log(`Processing document: Upserting vectors to Pinecone`, {
+            documentId,
+            batchNumber: Math.floor(i / EMBEDDING_BATCH_SIZE) + 1,
+            upsertBatchNumber: Math.floor(j / UPSERT_BATCH_SIZE) + 1,
+            vectorCount: upsertBatch.length,
+          })
 
-          console.log(`Processing document: Vectors upserted successfully`, {
-            documentId,
-            batchNumber: Math.floor(i / BATCH_SIZE) + 1,
-            vectorsInserted: embeddings.length,
-            upsertResult,
-          })
-        } catch (upsertError) {
-          console.error(`Error upserting vectors to Pinecone`, {
-            documentId,
-            batchNumber: Math.floor(i / BATCH_SIZE) + 1,
-            error: upsertError instanceof Error ? upsertError.message : "Unknown error",
-          })
-          failedEmbeddings += embeddings.length
+          try {
+            const upsertResult = await upsertVectors(upsertBatch)
+            totalVectorsInserted += upsertBatch.length
+
+            console.log(`Processing document: Vectors upserted successfully`, {
+              documentId,
+              batchNumber: Math.floor(i / EMBEDDING_BATCH_SIZE) + 1,
+              upsertBatchNumber: Math.floor(j / UPSERT_BATCH_SIZE) + 1,
+              vectorsInserted: upsertBatch.length,
+              upsertResult,
+            })
+          } catch (upsertError) {
+            console.error(`Error upserting vectors to Pinecone`, {
+              documentId,
+              batchNumber: Math.floor(i / EMBEDDING_BATCH_SIZE) + 1,
+              upsertBatchNumber: Math.floor(j / UPSERT_BATCH_SIZE) + 1,
+              error: upsertError instanceof Error ? upsertError.message : "Unknown error",
+            })
+            failedEmbeddings += upsertBatch.length
+          }
         }
       } else {
         console.warn(`Processing document: No valid embeddings in batch`, {
           documentId,
-          batchNumber: Math.floor(i / BATCH_SIZE) + 1,
+          batchNumber: Math.floor(i / EMBEDDING_BATCH_SIZE) + 1,
         })
       }
     }

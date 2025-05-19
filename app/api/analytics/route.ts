@@ -17,6 +17,7 @@ export const runtime = "edge"
 
 // Maximum number of vectors to query
 const MAX_VECTORS_PER_QUERY = 10000
+const VECTOR_DIMENSION = 1536
 
 export const GET = withErrorHandling(async (request: NextRequest) => {
   return handleApiRequest(async () => {
@@ -32,51 +33,33 @@ export const GET = withErrorHandling(async (request: NextRequest) => {
       }
 
       // Create a dummy vector for querying
-      const dummyVector = new Array(1536).fill(0.001)
+      const dummyVector = new Array(VECTOR_DIMENSION).fill(0.001)
 
       // Get document count
-      const documentResult = await queryVectors(
-        dummyVector,
-        MAX_VECTORS_PER_QUERY,
-        true,
-        {
-          record_type: "document_metadata",
-          user_id: userId,
-        },
-        "metadata",
-      )
+      const documentResult = await queryVectors(dummyVector, MAX_VECTORS_PER_QUERY, true, {
+        record_type: "document",
+        user_id: userId,
+      })
 
       // Get chunk count
       const chunkResult = await queryVectors(dummyVector, MAX_VECTORS_PER_QUERY, true, {
-        record_type: "document_chunk",
+        record_type: "chunk",
         user_id: userId,
       })
 
       // Get search count
-      const searchResult = await queryVectors(
-        dummyVector,
-        MAX_VECTORS_PER_QUERY,
-        true,
-        {
-          record_type: "search",
-          user_id: userId,
-        },
-        "metadata",
-      )
+      const searchResult = await queryVectors(dummyVector, MAX_VECTORS_PER_QUERY, true, {
+        record_type: "search_history",
+        user_id: userId,
+      })
 
       // Get chat count
-      const chatResult = await queryVectors(
-        dummyVector,
-        MAX_VECTORS_PER_QUERY,
-        true,
-        {
-          record_type: "chat_message",
-          user_id: userId,
-        },
-        "metadata",
-      )
+      const chatResult = await queryVectors(dummyVector, MAX_VECTORS_PER_QUERY, true, {
+        record_type: "message",
+        user_id: userId,
+      })
 
-      // Extract counts
+      // Extract counts with fallback to 0
       const documentCount = documentResult.matches?.length || 0
       const chunkCount = chunkResult.matches?.length || 0
       const searchCount = searchResult.matches?.length || 0

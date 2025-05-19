@@ -5,78 +5,84 @@
  * This ensures full compatibility with Edge runtime.
  */
 
-import {
-  VECTOR_DIMENSION,
-  INDEX_NAME,
-  PINECONE_HOST,
-  validateVectorDimension,
-  createDummyVector,
-} from "./embedding-config"
+import { validateVectorDimension, VECTOR_DIMENSION } from "./embedding-config"
 
-// Environment variables with validation
-const apiKey = process.env.PINECONE_API_KEY
-if (!apiKey) {
-  throw new Error("[PineconeClient] PINECONE_API_KEY is not defined")
+// Singleton instance
+let apiKey: string | null = null
+let indexName: string | null = null
+
+/**
+ * Gets the Pinecone client configuration
+ */
+export function getPineconeClient() {
+  if (!apiKey) {
+    apiKey = process.env.PINECONE_API_KEY
+    if (!apiKey) {
+      throw new Error("PINECONE_API_KEY is not defined")
+    }
+  }
+
+  if (!indexName) {
+    indexName = process.env.PINECONE_INDEX_NAME
+    if (!indexName) {
+      throw new Error("PINECONE_INDEX_NAME is not defined")
+    }
+  }
+
+  const host = `https://${indexName}.svc.${process.env.PINECONE_ENVIRONMENT || "gcp-starter"}.pinecone.io`
+
+  return { apiKey, indexName, host }
 }
 
 /**
- * Validates if a vector is valid for Pinecone (not all zeros)
+ * Implements exponential backoff retry logic
  */
-function isValidVector(vector: number[], vectorId: string): boolean {
-  // Check if vector is all zeros
-  if (vector.every((v) => v === 0)) {
-    console.error("[PineconeClient] Rejecting all-zero vector", { vectorId })
-    return false
-  }
+async function fetchWithRetry(url: string, options: RequestInit, retries = 3, backoff = 300): Promise<Response> {
+  try {
+    const response = await fetch(url, options)
 
-  // Check if vector has extremely low variance (near-zero vectors)
-  const nonZeroValues = vector.filter((v) => v !== 0)
-  if (nonZeroValues.length < vector.length * 0.01) {
-    console.warn("[PineconeClient] Warning: Vector has very few non-zero values", {
-      vectorId,
-      totalDimensions: vector.length,
-      nonZeroDimensions: nonZeroValues.length,
-    })
-    // Still allow it, but with a warning
-  }
+    // If rate limited or service unavailable, retry with backoff
+    if (response.status === 429 || response.status === 503) {
+      if (retries === 0) throw new Error(`Max retries reached: ${response.status} ${response.statusText}`)
 
-  return true
+      // Use Retry-After header if available, or exponential backoff
+      const retryAfter = response.headers.get("Retry-After")
+      const waitTime = retryAfter ? Number.parseInt(retryAfter, 10) * 1000 : backoff
+
+      console.log(`Rate limited (${response.status}). Retrying in ${waitTime}ms. Retries left: ${retries}`)
+      await new Promise((resolve) => setTimeout(resolve, waitTime))
+
+      return fetchWithRetry(url, options, retries - 1, backoff * 2)
+    }
+
+    return response
+  } catch (error) {
+    if (retries === 0) throw error
+
+    console.log(`Network error. Retrying in ${backoff}ms. Retries left: ${retries}`)
+    await new Promise((resolve) => setTimeout(resolve, backoff))
+
+    return fetchWithRetry(url, options, retries - 1, backoff * 2)
+  }
 }
 
 /**
  * Upsert vectors to Pinecone
  */
 export async function upsertVectors(vectors: any[], namespace = "") {
-  // Group vectors by document_id for better logging
-  const documentGroups = new Map<string, number>()
-  vectors.forEach((vector) => {
-    if (vector.metadata?.document_id) {
-      const docId = vector.metadata.document_id
-      documentGroups.set(docId, (documentGroups.get(docId) || 0) + 1)
-    }
-  })
-
-  const documentCounts = Array.from(documentGroups.entries())
-    .map(([docId, count]) => `${docId}: ${count}`)
-    .join(", ")
-
-  console.log(`[PineconeClient] Upserting ${vectors.length} vectors to Pinecone`, {
+  console.log(`Upserting ${vectors.length} vectors to Pinecone`, {
     namespace: namespace || "default",
-    documentCounts: documentCounts || "No document IDs found",
     vectorCount: vectors.length,
-    indexName: INDEX_NAME,
-    dimensions: VECTOR_DIMENSION,
   })
 
   try {
+    const { apiKey, host } = getPineconeClient()
+
     // Filter out invalid vectors
     const validVectors = vectors.filter((vector) => {
       if (!vector.values || !Array.isArray(vector.values)) {
-        console.error("[PineconeClient] Rejecting vector with missing or invalid values array", {
+        console.error("Rejecting vector with missing or invalid values array", {
           vectorId: vector.id,
-          hasValues: !!vector.values,
-          isArray: Array.isArray(vector.values || null),
-          documentId: vector.metadata?.document_id || "unknown",
         })
         return false
       }
@@ -86,81 +92,56 @@ export async function upsertVectors(vectors: any[], namespace = "") {
         validateVectorDimension(vector.values)
 
         // Validate vector is not all zeros
-        return isValidVector(vector.values, vector.id)
+        return !vector.values.every((v) => v === 0)
       } catch (error) {
-        console.error("[PineconeClient] Rejecting invalid vector", {
+        console.error("Rejecting invalid vector", {
           vectorId: vector.id,
-          documentId: vector.metadata?.document_id || "unknown",
           error: error instanceof Error ? error.message : "Unknown error",
         })
         return false
       }
     })
 
-    // Log if any vectors were filtered out
-    if (validVectors.length < vectors.length) {
-      console.warn(`[PineconeClient] Filtered out ${vectors.length - validVectors.length} invalid vectors`, {
-        originalCount: vectors.length,
-        validCount: validVectors.length,
+    // If no valid vectors remain, return early
+    if (validVectors.length === 0) {
+      console.warn("No valid vectors to upsert")
+      return { upsertedCount: 0 }
+    }
+
+    // Process in batches of 100
+    const BATCH_SIZE = 100
+    let totalUpserted = 0
+
+    for (let i = 0; i < validVectors.length; i += BATCH_SIZE) {
+      const batch = validVectors.slice(i, i + BATCH_SIZE)
+
+      const response = await fetchWithRetry(`${host}/vectors/upsert`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Api-Key": apiKey,
+        },
+        body: JSON.stringify({ vectors: batch, namespace }),
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        throw new Error(`Upsert failed: ${response.status} ${response.statusText} - ${errorText}`)
+      }
+
+      const result = await response.json()
+      totalUpserted += batch.length
+
+      console.log(`Successfully upserted batch of vectors`, {
+        batchSize: batch.length,
+        totalUpserted,
         namespace: namespace || "default",
       })
     }
 
-    // If no valid vectors remain, return early
-    if (validVectors.length === 0) {
-      console.warn("[PineconeClient] No valid vectors to upsert")
-      return { upsertedCount: 0 }
-    }
-
-    const response = await fetch(`${PINECONE_HOST}/vectors/upsert`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Api-Key": apiKey,
-      },
-      body: JSON.stringify({ vectors: validVectors, namespace }),
-    })
-
-    if (!response.ok) {
-      const errorText = await response.text()
-      console.error(`[PineconeClient] Upsert error: Status ${response.status}`, {
-        statusText: response.statusText,
-        error: errorText,
-        host: PINECONE_HOST.split(".")[0], // Log only the first part of the host for security
-        vectorCount: validVectors.length,
-        dimensions: VECTOR_DIMENSION,
-        indexName: INDEX_NAME,
-      })
-      throw new Error(`[PineconeClient] Upsert failed: ${response.status} ${response.statusText} - ${errorText}`)
-    }
-
-    const result = await response.json()
-
-    // Group successful vectors by document_id for better logging
-    const successDocumentGroups = new Map<string, number>()
-    validVectors.forEach((vector) => {
-      if (vector.metadata?.document_id) {
-        const docId = vector.metadata.document_id
-        successDocumentGroups.set(docId, (successDocumentGroups.get(docId) || 0) + 1)
-      }
-    })
-
-    const successDocumentCounts = Array.from(successDocumentGroups.entries())
-      .map(([docId, count]) => `${docId}: ${count}`)
-      .join(", ")
-
-    console.log(`[PineconeClient] Successfully upserted vectors`, {
-      upsertedCount: validVectors.length,
-      namespace: namespace || "default",
-      successDocumentCounts: successDocumentCounts || "No document IDs found",
-      result,
-      dimensions: VECTOR_DIMENSION,
-      indexName: INDEX_NAME,
-    })
-
-    return result
+    return { upsertedCount: totalUpserted }
   } catch (error) {
-    console.error("[PineconeClient] Upsert exception:", error)
+    console.error("Upsert exception:", error)
     throw error
   }
 }
@@ -175,15 +156,15 @@ export async function queryVectors(
   filter?: Record<string, any>,
   namespace = "",
 ) {
-  console.log(`[PineconeClient] Querying Pinecone`, {
+  console.log(`Querying Pinecone`, {
     topK,
     filter: filter ? JSON.stringify(filter).substring(0, 100) + "..." : "none",
     namespace: namespace || "default",
-    indexName: INDEX_NAME,
-    dimensions: VECTOR_DIMENSION,
   })
 
   try {
+    const { apiKey, host } = getPineconeClient()
+
     // Validate query vector dimension
     validateVectorDimension(vector)
 
@@ -198,7 +179,7 @@ export async function queryVectors(
       queryBody.filter = filter
     }
 
-    const response = await fetch(`${PINECONE_HOST}/query`, {
+    const response = await fetchWithRetry(`${host}/query`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -209,14 +190,9 @@ export async function queryVectors(
 
     if (!response.ok) {
       const errorText = await response.text()
-      console.error(`[PineconeClient] Query error: Status ${response.status}`, {
+      console.error(`Query error: Status ${response.status}`, {
         statusText: response.statusText,
         error: errorText,
-        host: PINECONE_HOST.split(".")[0], // Log only the first part of the host for security
-        topK,
-        filter: filter ? JSON.stringify(filter).substring(0, 100) + "..." : "none",
-        dimensions: VECTOR_DIMENSION,
-        indexName: INDEX_NAME,
       })
 
       // Return empty matches instead of throwing to provide fallback behavior
@@ -224,15 +200,13 @@ export async function queryVectors(
     }
 
     const result = await response.json()
-    console.log(`[PineconeClient] Query successful`, {
+    console.log(`Query successful`, {
       matchCount: result.matches?.length || 0,
       namespace: namespace || "default",
-      dimensions: VECTOR_DIMENSION,
-      indexName: INDEX_NAME,
     })
     return result
   } catch (error) {
-    console.error("[PineconeClient] Query exception:", error)
+    console.error("Query exception:", error)
     // Return empty matches instead of throwing to provide fallback behavior
     return { matches: [], error: true, errorMessage: error instanceof Error ? error.message : String(error) }
   }
@@ -242,13 +216,14 @@ export async function queryVectors(
  * Delete vectors from Pinecone
  */
 export async function deleteVectors(ids: string[], namespace = "") {
-  console.log(`[PineconeClient] Deleting ${ids.length} vectors from Pinecone`, {
+  console.log(`Deleting ${ids.length} vectors from Pinecone`, {
     namespace: namespace || "default",
-    indexName: INDEX_NAME,
   })
 
   try {
-    const response = await fetch(`${PINECONE_HOST}/vectors/delete`, {
+    const { apiKey, host } = getPineconeClient()
+
+    const response = await fetchWithRetry(`${host}/vectors/delete`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -259,26 +234,18 @@ export async function deleteVectors(ids: string[], namespace = "") {
 
     if (!response.ok) {
       const errorText = await response.text()
-      console.error(`[PineconeClient] Delete error: Status ${response.status}`, {
-        statusText: response.statusText,
-        error: errorText,
-        host: PINECONE_HOST.split(".")[0], // Log only the first part of the host for security
-        idCount: ids.length,
-        indexName: INDEX_NAME,
-      })
-      throw new Error(`[PineconeClient] Delete failed: ${response.status} ${response.statusText} - ${errorText}`)
+      throw new Error(`Delete failed: ${response.status} ${response.statusText} - ${errorText}`)
     }
 
     const result = await response.json()
-    console.log(`[PineconeClient] Successfully deleted vectors`, {
+    console.log(`Successfully deleted vectors`, {
       deletedCount: ids.length,
       namespace: namespace || "default",
       result,
-      indexName: INDEX_NAME,
     })
     return result
   } catch (error) {
-    console.error("[PineconeClient] Delete exception:", error)
+    console.error("Delete exception:", error)
     throw error
   }
 }
@@ -288,11 +255,15 @@ export async function deleteVectors(ids: string[], namespace = "") {
  */
 export async function healthCheck(): Promise<{ healthy: boolean; error?: string }> {
   try {
-    // Create a dummy vector for the health check
-    const dummyVector = createDummyVector()
+    const { apiKey, host } = getPineconeClient()
+
+    // Create a minimal vector for the health check
+    const dummyVector = Array(VECTOR_DIMENSION)
+      .fill(0)
+      .map(() => Math.random() * 0.001)
 
     // Make a minimal query to check connectivity
-    const response = await fetch(`${PINECONE_HOST}/query`, {
+    const response = await fetch(`${host}/query`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -309,7 +280,7 @@ export async function healthCheck(): Promise<{ healthy: boolean; error?: string 
       const errorText = await response.text()
       return {
         healthy: false,
-        error: `[PineconeClient] Health check failed: ${response.status} ${response.statusText} - ${errorText}`,
+        error: `Health check failed: ${response.status} ${response.statusText} - ${errorText}`,
       }
     }
 
@@ -317,7 +288,7 @@ export async function healthCheck(): Promise<{ healthy: boolean; error?: string 
   } catch (error) {
     return {
       healthy: false,
-      error: `[PineconeClient] Health check exception: ${error instanceof Error ? error.message : String(error)}`,
+      error: `Health check exception: ${error instanceof Error ? error.message : String(error)}`,
     }
   }
 }

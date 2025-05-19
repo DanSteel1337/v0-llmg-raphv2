@@ -19,7 +19,7 @@ import { upsertVectors, queryVectors, deleteVectors } from "@/lib/pinecone-rest-
 import { generateEmbedding } from "@/lib/embedding-service"
 import { VECTOR_DIMENSION } from "@/lib/embedding-config"
 import { openai } from "@ai-sdk/openai"
-import { generateText } from "ai"
+import { streamText } from "ai"
 import type { ChatMessage, Conversation, CreateMessageOptions } from "@/types"
 
 // Constants
@@ -272,8 +272,12 @@ export async function createMessage({
   role,
   content,
   sources,
+  turnIndex,
 }: CreateMessageOptions): Promise<ChatMessage> {
-  const messageId = uuidv4()
+  // Use the correct ID format for chat messages
+  const messageId =
+    turnIndex !== undefined ? `mem_${conversationId}_${turnIndex}` : `mem_${conversationId}_${Date.now()}`
+
   const now = new Date().toISOString()
 
   const message: ChatMessage = {
@@ -348,17 +352,24 @@ export async function generateResponse(
 Context:
 ${context.map((item) => `${item.content} [Document: ${item.documentName}]`).join("\n\n")}`
 
-    // 4. Generate response using AI SDK's generateText
-    // This properly handles the messages format internally
+    // 4. Generate response using AI SDK's streamText
     try {
-      console.log("Generating response with AI SDK...")
+      console.log("Generating response with AI SDK streamText...")
 
-      const { text: responseContent } = await generateText({
+      let responseContent = ""
+      const turnIndex = history.length
+
+      const result = await streamText({
         model: openai("gpt-4o"),
         system: systemMessage,
         messages: recentHistory,
         temperature: 0.7,
         maxTokens: 1000,
+        onChunk: ({ chunk }) => {
+          if (chunk.type === "text-delta") {
+            responseContent += chunk.text
+          }
+        },
       })
 
       // Extract unique document names from context
@@ -375,6 +386,7 @@ ${context.map((item) => `${item.content} [Document: ${item.documentName}]`).join
         role: "assistant",
         content: responseContent,
         sources,
+        turnIndex,
       })
 
       return assistantMessage
