@@ -1,6 +1,6 @@
 /**
  * Edge-compatible Pinecone client
- * Uses v0.5.2 of the Pinecone SDK
+ * Uses v3.0.1 of the Pinecone SDK
  */
 
 import { PineconeClient } from "@pinecone-database/pinecone"

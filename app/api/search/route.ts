@@ -13,6 +13,7 @@ import { performSearch } from "@/services/search-service"
 import { handleApiRequest } from "@/lib/api-utils"
 import { withErrorHandling } from "@/lib/error-handler"
 
+// Ensure the Edge runtime is declared
 export const runtime = "edge"
 
 export const GET = withErrorHandling(async (request: NextRequest) => {
