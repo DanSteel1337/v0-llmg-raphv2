@@ -17,11 +17,12 @@ import { v4 as uuidv4 } from "uuid"
 import { upsertVectors, queryVectors, deleteVectors } from "@/lib/pinecone-rest-client"
 import { generateEmbedding } from "@/lib/embedding-service"
 import { chunkDocument } from "@/lib/chunking-utils"
-import { VECTOR_DIMENSION, EMBEDDING_MODEL } from "@/lib/embedding-config"
+import { getEmbeddingConfig } from "@/lib/embedding-config"
 import type { Document, ProcessDocumentOptions } from "@/types"
 
 // Constants
 const MAX_CHUNK_SIZE = 1000
+const { dimensions } = getEmbeddingConfig()
 
 /**
  * Creates a new document
@@ -53,7 +54,7 @@ export async function createDocument(
   }
 
   // Create a zero vector with the correct dimension
-  const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+  const zeroVector = new Array(dimensions).fill(0)
 
   await upsertVectors([
     {
@@ -73,39 +74,49 @@ export async function createDocument(
  * Gets all documents for a user
  */
 export async function getDocumentsByUserId(userId: string): Promise<Document[]> {
-  // Create a zero vector with the correct dimension
-  const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+  try {
+    console.log(`getDocumentsByUserId: Fetching documents for user ${userId}`)
 
-  const response = await queryVectors(
-    zeroVector, // Zero vector with correct dimension
-    100,
-    true,
-    {
-      user_id: { $eq: userId },
-      record_type: { $eq: "document" },
-    },
-  )
+    // Create a zero vector with the correct dimension
+    const zeroVector = new Array(dimensions).fill(0)
 
-  // Handle potential error from Pinecone
-  if ("error" in response && response.error) {
-    console.error("Error querying documents from Pinecone:", response)
-    return [] // Return empty array as fallback
+    const response = await queryVectors(
+      zeroVector, // Zero vector with correct dimension
+      100,
+      true,
+      {
+        user_id: { $eq: userId },
+        record_type: { $eq: "document" },
+      },
+    )
+
+    // Handle potential error from Pinecone
+    if ("error" in response && response.error) {
+      console.error("Error querying documents from Pinecone:", response)
+      return [] // Return empty array as fallback
+    }
+
+    const documents = (response.matches || []).map((match) => ({
+      id: match.id,
+      user_id: match.metadata?.user_id as string,
+      name: match.metadata?.name as string,
+      description: match.metadata?.description as string,
+      file_type: match.metadata?.file_type as string,
+      file_size: match.metadata?.file_size as number,
+      file_path: match.metadata?.file_path as string,
+      status: match.metadata?.status as "processing" | "indexed" | "failed",
+      processing_progress: match.metadata?.processing_progress as number,
+      error_message: match.metadata?.error_message as string | undefined,
+      created_at: match.metadata?.created_at as string,
+      updated_at: match.metadata?.updated_at as string,
+    }))
+
+    console.log(`getDocumentsByUserId: Successfully fetched ${documents.length} documents for user ${userId}`)
+    return documents
+  } catch (error) {
+    console.error(`getDocumentsByUserId: Error fetching documents for user ${userId}:`, error)
+    throw error
   }
-
-  return (response.matches || []).map((match) => ({
-    id: match.id,
-    user_id: match.metadata?.user_id as string,
-    name: match.metadata?.name as string,
-    description: match.metadata?.description as string,
-    file_type: match.metadata?.file_type as string,
-    file_size: match.metadata?.file_size as number,
-    file_path: match.metadata?.file_path as string,
-    status: match.metadata?.status as "processing" | "indexed" | "failed",
-    processing_progress: match.metadata?.processing_progress as number,
-    error_message: match.metadata?.error_message as string | undefined,
-    created_at: match.metadata?.created_at as string,
-    updated_at: match.metadata?.updated_at as string,
-  }))
 }
 
 /**
@@ -114,7 +125,7 @@ export async function getDocumentsByUserId(userId: string): Promise<Document[]> 
 export async function getDocumentCountByUserId(userId: string): Promise<number> {
   try {
     // Create a zero vector with the correct dimension
-    const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+    const zeroVector = new Array(dimensions).fill(0)
 
     // Query Pinecone for documents with the specified user_id
     const response = await queryVectors(
@@ -145,7 +156,7 @@ export async function getDocumentCountByUserId(userId: string): Promise<number> 
  */
 export async function getDocumentById(id: string): Promise<Document | null> {
   // Create a zero vector with the correct dimension
-  const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+  const zeroVector = new Array(dimensions).fill(0)
 
   const response = await queryVectors(
     zeroVector, // Zero vector with correct dimension
@@ -210,7 +221,7 @@ export async function updateDocumentStatus(
   }
 
   // Create a zero vector with the correct dimension
-  const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+  const zeroVector = new Array(dimensions).fill(0)
 
   await upsertVectors([
     {
@@ -234,7 +245,7 @@ export async function deleteDocument(id: string): Promise<void> {
   await deleteVectors([id])
 
   // Create a zero vector with the correct dimension
-  const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+  const zeroVector = new Array(dimensions).fill(0)
 
   // Find all chunks for this document
   const response = await queryVectors(
@@ -360,12 +371,7 @@ export async function processDocument({
       return { success: false, chunksProcessed: 0, vectorsInserted: 0, error: errorMessage }
     }
 
-    await updateDocumentStatus(
-      documentId,
-      "processing",
-      40,
-      `Generating embeddings for ${chunks.length} chunks using ${EMBEDDING_MODEL}`,
-    )
+    await updateDocumentStatus(documentId, "processing", 40, `Generating embeddings for ${chunks.length} chunks`)
 
     // 3. Generate embeddings and store in Pinecone
     const BATCH_SIZE = 20

@@ -9,28 +9,12 @@
 const isClient = typeof window !== "undefined"
 
 // Get embedding configuration based on environment variables
-export const getEmbeddingConfig = () => {
-  // If we're on the client side, throw a clear error or return client-safe defaults
-  if (isClient) {
-    console.warn("[EmbeddingConfig] Attempted to access server-only configuration on the client side")
-    return {
-      model: "text-embedding-3-large",
-      dimensions: 3072,
-      indexName: "pinecone-index", // This is just a placeholder
-      host: "https://api.example.com", // This is just a placeholder
-      isClientSide: true,
-    }
-  }
-
-  // Minimal, hardcoded server-only configuration for embedding model and Pinecone.
-  return {
-    model: "text-embedding-3-large",
-    dimensions: 3072,
-    indexName: process.env.PINECONE_INDEX_NAME!,
-    host: process.env.PINECONE_HOST!,
-    isClientSide: false,
-  }
-}
+export const getEmbeddingConfig = () => ({
+  model: "text-embedding-3-large",
+  dimensions: 3072,
+  indexName: process.env.PINECONE_INDEX_NAME!,
+  host: process.env.PINECONE_HOST!,
+})
 
 // Create a safe version of the config that won't throw on the client side
 let config: ReturnType<typeof getEmbeddingConfig>
@@ -57,7 +41,7 @@ export const EMBEDDING_MODEL = "text-embedding-3-large"
 export const VECTOR_DIMENSION = 3072
 export const INDEX_NAME = config.indexName
 export const PINECONE_HOST = config.host
-export const IS_CLIENT_SIDE = config.isClientSide
+export const IS_CLIENT_SIDE = isClient
 
 // Validate vector dimensions against the expected dimension
 export function validateVectorDimension(vector: number[]): void {

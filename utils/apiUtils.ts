@@ -1,16 +1,23 @@
 /**
  * API Utilities
  *
- * Common utilities for API operations.
+ * Common utilities for API routes.
  */
 
 import { NextResponse } from "next/server"
 
 /**
- * Wrap an API handler with standardized error handling
+ * Wrap an API handler with error handling
  */
-export function withErrorHandling<T>(handler: () => Promise<T>): Promise<NextResponse> {
-  return handleApiRequest(handler)
+export function withErrorHandling(handler: Function) {
+  return async (req: Request, ...args: any[]) => {
+    try {
+      return await handler(req, ...args)
+    } catch (error) {
+      console.error("API error:", error)
+      return NextResponse.json({ error: error instanceof Error ? error.message : "Unknown error" }, { status: 500 })
+    }
+  }
 }
 
 /**
@@ -43,38 +50,28 @@ export function validateRequiredFields(body: any, fields: string[]): void {
 }
 
 /**
- * Create a new document record
+ * Create a document
  */
 export async function createDocument(
   userId: string,
   name: string,
-  fileType: string,
-  fileSize: number,
-  filePath: string,
-): Promise<Document> {
-  // This is a placeholder - implement actual document creation logic
-  // In a real implementation, this would call an API or database
+  description?: string,
+  fileType?: string,
+  fileSize?: number,
+  filePath?: string,
+): Promise<any> {
+  // This is a placeholder implementation
+  // In a real application, you would call your document service
   return {
-    id: `doc-${Date.now()}`,
-    name,
-    file_path: filePath,
-    file_type: fileType,
-    file_size: fileSize,
+    id: "doc-123",
     user_id: userId,
+    name,
+    description: description || "",
+    file_type: fileType || "text/plain",
+    file_size: fileSize || 0,
+    file_path: filePath || "",
+    status: "processing",
     created_at: new Date().toISOString(),
-    status: "pending",
+    updated_at: new Date().toISOString(),
   }
-}
-
-// Type definition for Document
-interface Document {
-  id: string
-  name: string
-  file_path: string
-  file_type: string
-  file_size: number
-  user_id: string
-  created_at: string
-  status: string
-  [key: string]: any
 }
