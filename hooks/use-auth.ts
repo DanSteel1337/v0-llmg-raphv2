@@ -4,7 +4,7 @@
  * Custom hook for authentication functionality.
  *
  * Dependencies:
- * - ../services/auth-service for authentication operations
+ * - @/services/auth-service for authentication operations
  */
 
 "use client"
@@ -18,7 +18,7 @@ import {
   signOut as authSignOut,
   resetPassword as authResetPassword,
   updatePassword as authUpdatePassword,
-} from "../services/auth-service"
+} from "@/services/auth-service"
 import type { User } from "@supabase/supabase-js"
 
 export function useAuth() {

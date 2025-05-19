@@ -1,0 +1,28 @@
+{
+  "extends": "next/core-web-vitals",
+  "rules": {
+    "no-restricted-imports": [
+      "error",
+      {
+        "paths": [
+          {
+            "name": "@supabase/auth-helpers-nextjs",
+            "importNames": ["createClientComponentClient", "createBrowserSupabaseClient"],
+            "message": "Please use the singleton pattern from @/lib/supabase-client.ts instead of creating a new client directly."
+          },
+          {
+            "name": "@supabase/supabase-js",
+            "importNames": ["createClient"],
+            "message": "Please use the singleton pattern from @/lib/supabase-client.ts instead of creating a new client directly."
+          }
+        ],
+        "patterns": [
+          {
+            "group": ["@supabase/*/createClient*"],
+            "message": "Please use the singleton pattern from @/lib/supabase-client.ts instead of creating a new client directly."
+          }
+        ]
+      }
+    ]
+  }
+}
