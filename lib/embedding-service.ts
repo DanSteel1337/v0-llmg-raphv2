@@ -41,6 +41,8 @@ function validateEmbeddingVector(embedding: number[]): void {
  * Generate an embedding for the given text
  */
 export async function generateEmbedding(text: string): Promise<number[]> {
+  const startTime = Date.now()
+
   try {
     // Validate input text before calling the API
     validateInputText(text)
@@ -49,6 +51,7 @@ export async function generateEmbedding(text: string): Promise<number[]> {
       textLength: text.length,
       model: EMBEDDING_MODEL,
       expectedDimension: VECTOR_DIMENSION,
+      textSample: text.length > 100 ? `${text.substring(0, 100)}...` : text,
     })
 
     const { embedding } = await embed({
@@ -56,19 +59,34 @@ export async function generateEmbedding(text: string): Promise<number[]> {
       value: text,
     })
 
+    const duration = Date.now() - startTime
+
     // Validate the embedding dimension
     validateVectorDimension(embedding)
 
     // Validate the embedding is not all zeros
     validateEmbeddingVector(embedding)
 
-    console.log("Successfully generated embedding", { dimensions: embedding.length })
+    console.log("Successfully generated embedding", {
+      dimensions: embedding.length,
+      duration: `${duration}ms`,
+      textLength: text.length,
+      nonZeroValues: embedding.filter((v) => v !== 0).length,
+    })
+
     return embedding
   } catch (error) {
-    console.error("Error generating embedding:", error, {
-      textSample: text ? text.substring(0, 100) + "..." : "undefined",
+    const duration = Date.now() - startTime
+
+    console.error("Error generating embedding:", {
+      error: error instanceof Error ? error.message : "Unknown error",
+      stack: error instanceof Error ? error.stack : undefined,
+      textSample: text ? `${text.substring(0, 100)}...` : "undefined",
       textLength: text?.length,
+      duration: `${duration}ms`,
+      model: EMBEDDING_MODEL,
     })
+
     throw new Error(`Failed to generate embedding: ${error instanceof Error ? error.message : "Unknown error"}`)
   }
 }

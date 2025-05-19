@@ -47,7 +47,24 @@ function isValidVector(vector: number[], vectorId: string): boolean {
  * Upsert vectors to Pinecone
  */
 export async function upsertVectors(vectors: any[], namespace = "") {
-  console.log(`Upserting ${vectors.length} vectors to Pinecone`)
+  // Group vectors by document_id for better logging
+  const documentGroups = new Map<string, number>()
+  vectors.forEach((vector) => {
+    if (vector.metadata?.document_id) {
+      const docId = vector.metadata.document_id
+      documentGroups.set(docId, (documentGroups.get(docId) || 0) + 1)
+    }
+  })
+
+  const documentCounts = Array.from(documentGroups.entries())
+    .map(([docId, count]) => `${docId}: ${count}`)
+    .join(", ")
+
+  console.log(`Upserting ${vectors.length} vectors to Pinecone`, {
+    namespace: namespace || "default",
+    documentCounts: documentCounts || "No document IDs found",
+    vectorCount: vectors.length,
+  })
 
   try {
     if (!apiKey) {
@@ -65,6 +82,7 @@ export async function upsertVectors(vectors: any[], namespace = "") {
           vectorId: vector.id,
           hasValues: !!vector.values,
           isArray: Array.isArray(vector.values || null),
+          documentId: vector.metadata?.document_id || "unknown",
         })
         return false
       }
@@ -78,6 +96,7 @@ export async function upsertVectors(vectors: any[], namespace = "") {
       } catch (error) {
         console.error("Rejecting invalid vector", {
           vectorId: vector.id,
+          documentId: vector.metadata?.document_id || "unknown",
           error: error instanceof Error ? error.message : "Unknown error",
         })
         return false
@@ -86,7 +105,11 @@ export async function upsertVectors(vectors: any[], namespace = "") {
 
     // Log if any vectors were filtered out
     if (validVectors.length < vectors.length) {
-      console.warn(`Filtered out ${vectors.length - validVectors.length} invalid vectors`)
+      console.warn(`Filtered out ${vectors.length - validVectors.length} invalid vectors`, {
+        originalCount: vectors.length,
+        validCount: validVectors.length,
+        namespace: namespace || "default",
+      })
     }
 
     // If no valid vectors remain, return early
@@ -116,12 +139,27 @@ export async function upsertVectors(vectors: any[], namespace = "") {
     }
 
     const result = await response.json()
+
+    // Group successful vectors by document_id for better logging
+    const successDocumentGroups = new Map<string, number>()
+    validVectors.forEach((vector) => {
+      if (vector.metadata?.document_id) {
+        const docId = vector.metadata.document_id
+        successDocumentGroups.set(docId, (successDocumentGroups.get(docId) || 0) + 1)
+      }
+    })
+
+    const successDocumentCounts = Array.from(successDocumentGroups.entries())
+      .map(([docId, count]) => `${docId}: ${count}`)
+      .join(", ")
+
     console.log(`Successfully upserted vectors to Pinecone`, {
       upsertedCount: validVectors.length,
-      originalCount: vectors.length,
-      filteredCount: vectors.length - validVectors.length,
+      namespace: namespace || "default",
+      successDocumentCounts: successDocumentCounts || "No document IDs found",
       result,
     })
+
     return result
   } catch (error) {
     console.error("Pinecone upsert exception:", error)
@@ -142,6 +180,7 @@ export async function queryVectors(
   console.log(`Querying Pinecone`, {
     topK,
     filter: filter ? JSON.stringify(filter).substring(0, 100) + "..." : "none",
+    namespace: namespace || "default",
   })
 
   try {
@@ -193,7 +232,7 @@ export async function queryVectors(
     const result = await response.json()
     console.log(`Pinecone query successful`, {
       matchCount: result.matches?.length || 0,
-      namespace,
+      namespace: namespace || "default",
     })
     return result
   } catch (error) {
@@ -207,7 +246,9 @@ export async function queryVectors(
  * Delete vectors from Pinecone
  */
 export async function deleteVectors(ids: string[], namespace = "") {
-  console.log(`Deleting ${ids.length} vectors from Pinecone`)
+  console.log(`Deleting ${ids.length} vectors from Pinecone`, {
+    namespace: namespace || "default",
+  })
 
   try {
     if (!apiKey) {
@@ -239,7 +280,11 @@ export async function deleteVectors(ids: string[], namespace = "") {
     }
 
     const result = await response.json()
-    console.log(`Successfully deleted vectors from Pinecone`, { deletedCount: ids.length, result })
+    console.log(`Successfully deleted vectors from Pinecone`, {
+      deletedCount: ids.length,
+      namespace: namespace || "default",
+      result,
+    })
     return result
   } catch (error) {
     console.error("Pinecone delete exception:", error)

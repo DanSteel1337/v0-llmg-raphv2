@@ -9,7 +9,7 @@
  */
 
 import type { NextRequest } from "next/server"
-import { processDocument } from "@/services/document-service"
+import { processDocument, updateDocumentStatus } from "@/services/document-service"
 import { handleApiRequest } from "@/lib/api-utils"
 import { withErrorHandling } from "@/lib/error-handler"
 
@@ -19,6 +19,13 @@ export const POST = withErrorHandling(async (request: NextRequest) => {
   return handleApiRequest(async () => {
     const body = await request.json()
     const { documentId, userId, filePath, fileName, fileType, fileUrl } = body
+
+    console.log(`POST /api/documents/process - Processing document`, {
+      documentId,
+      userId,
+      fileName,
+      fileType,
+    })
 
     if (!documentId) {
       throw new Error("Document ID is required")
@@ -44,15 +51,75 @@ export const POST = withErrorHandling(async (request: NextRequest) => {
       throw new Error("File URL is required")
     }
 
-    const success = await processDocument({
-      documentId,
-      userId,
-      filePath,
-      fileName,
-      fileType,
-      fileUrl,
-    })
+    try {
+      // Update document status to processing
+      await updateDocumentStatus(documentId, "processing", 5, "Starting document processing")
+      console.log(`POST /api/documents/process - Updated document status to processing`, { documentId })
 
-    return { success }
+      // Process the document
+      const result = await processDocument({
+        documentId,
+        userId,
+        filePath,
+        fileName,
+        fileType,
+        fileUrl,
+      })
+
+      if (result.success) {
+        console.log(`POST /api/documents/process - Document processing completed successfully`, {
+          documentId,
+          chunksProcessed: result.chunksProcessed,
+          vectorsInserted: result.vectorsInserted,
+        })
+
+        // Update document status to complete
+        await updateDocumentStatus(
+          documentId,
+          "indexed",
+          100,
+          `Document processed successfully: ${result.vectorsInserted} vectors inserted from ${result.chunksProcessed} chunks`,
+        )
+
+        return {
+          success: true,
+          documentId,
+          status: "indexed",
+          chunksProcessed: result.chunksProcessed,
+          vectorsInserted: result.vectorsInserted,
+        }
+      } else {
+        console.error(`POST /api/documents/process - Document processing failed`, {
+          documentId,
+          error: result.error,
+        })
+
+        // Update document status to failed
+        await updateDocumentStatus(documentId, "failed", 0, `Processing failed: ${result.error}`)
+
+        return {
+          success: false,
+          documentId,
+          status: "failed",
+          error: result.error,
+        }
+      }
+    } catch (error) {
+      console.error(`POST /api/documents/process - Error processing document`, {
+        documentId,
+        error: error instanceof Error ? error.message : "Unknown error",
+        stack: error instanceof Error ? error.stack : undefined,
+      })
+
+      // Update document status to failed
+      await updateDocumentStatus(
+        documentId,
+        "failed",
+        0,
+        `Processing error: ${error instanceof Error ? error.message : "Unknown error"}`,
+      )
+
+      throw error
+    }
   })
 })

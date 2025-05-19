@@ -17,7 +17,7 @@ import { v4 as uuidv4 } from "uuid"
 import { upsertVectors, queryVectors, deleteVectors } from "@/lib/pinecone-rest-client"
 import { generateEmbedding } from "@/lib/embedding-service"
 import { chunkDocument } from "@/lib/chunking-utils"
-import { VECTOR_DIMENSION } from "@/lib/embedding-config"
+import { VECTOR_DIMENSION, EMBEDDING_MODEL } from "@/lib/embedding-config"
 import type { Document, ProcessDocumentOptions } from "@/types"
 
 // Constants
@@ -244,6 +244,34 @@ export async function getFileSignedUrl(filePath: string): Promise<string> {
 }
 
 /**
+ * Validates if a chunk is informative enough to be embedded
+ */
+function isInformativeChunk(text: string): boolean {
+  if (!text || text.trim() === "") {
+    return false
+  }
+
+  // Skip chunks that are too short
+  if (text.trim().length < 10) {
+    return false
+  }
+
+  // Skip chunks that don't have enough unique words
+  const uniqueWords = new Set(
+    text
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((word) => word.length > 1),
+  )
+
+  if (uniqueWords.size < 3) {
+    return false
+  }
+
+  return true
+}
+
+/**
  * Processes a document: extracts text, chunks it, and stores embeddings
  */
 export async function processDocument({
@@ -253,44 +281,83 @@ export async function processDocument({
   fileName,
   fileType,
   fileUrl,
-}: ProcessDocumentOptions): Promise<boolean> {
+}: ProcessDocumentOptions): Promise<{
+  success: boolean
+  chunksProcessed: number
+  vectorsInserted: number
+  error?: string
+}> {
   try {
     // Update document status to processing
-    await updateDocumentStatus(documentId, "processing", 10)
+    await updateDocumentStatus(documentId, "processing", 10, "Fetching document content")
 
     // 1. Extract text from document
+    console.log(`Processing document: Fetching content`, { documentId, fileUrl })
     const response = await fetch(fileUrl)
     if (!response.ok) {
-      throw new Error(`Failed to fetch document: ${response.statusText}`)
+      const errorMessage = `Failed to fetch document: ${response.status} ${response.statusText}`
+      console.error(errorMessage, { documentId, fileUrl })
+      return { success: false, chunksProcessed: 0, vectorsInserted: 0, error: errorMessage }
     }
+
     const text = await response.text()
-    await updateDocumentStatus(documentId, "processing", 30)
+    console.log(`Processing document: Content fetched successfully`, {
+      documentId,
+      contentLength: text.length,
+    })
+    await updateDocumentStatus(documentId, "processing", 30, "Chunking document content")
 
     // 2. Split text into chunks
-    const chunks = chunkDocument(text, MAX_CHUNK_SIZE)
+    console.log(`Processing document: Chunking content`, { documentId })
+    const allChunks = chunkDocument(text, MAX_CHUNK_SIZE)
+
+    // Filter out non-informative chunks
+    const chunks = allChunks.filter((chunk) => isInformativeChunk(chunk))
+
+    console.log(`Processing document: Chunking complete`, {
+      documentId,
+      totalChunks: allChunks.length,
+      validChunks: chunks.length,
+      skippedChunks: allChunks.length - chunks.length,
+    })
 
     // Check if we have any valid chunks
     if (chunks.length === 0) {
-      console.error("No valid chunks extracted from document", { documentId, fileName })
-      await updateDocumentStatus(
-        documentId,
-        "failed",
-        0,
-        "Document processing failed: No valid content chunks could be extracted",
-      )
-      return false
+      const errorMessage = "Document processing failed: No valid content chunks could be extracted"
+      console.error(errorMessage, { documentId, fileName })
+      return { success: false, chunksProcessed: 0, vectorsInserted: 0, error: errorMessage }
     }
 
-    console.log(`Extracted ${chunks.length} valid chunks from document`, { documentId, fileName })
-    await updateDocumentStatus(documentId, "processing", 50)
+    await updateDocumentStatus(
+      documentId,
+      "processing",
+      40,
+      `Generating embeddings for ${chunks.length} chunks using ${EMBEDDING_MODEL}`,
+    )
 
     // 3. Generate embeddings and store in Pinecone
     const BATCH_SIZE = 20
     let successfulEmbeddings = 0
     let failedEmbeddings = 0
+    let totalVectorsInserted = 0
 
     for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
       const batch = chunks.slice(i, i + BATCH_SIZE)
+      const batchProgress = Math.floor(40 + (i / chunks.length) * 50)
+
+      await updateDocumentStatus(
+        documentId,
+        "processing",
+        batchProgress,
+        `Processing batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(chunks.length / BATCH_SIZE)}`,
+      )
+
+      console.log(`Processing document: Generating embeddings for batch`, {
+        documentId,
+        batchNumber: Math.floor(i / BATCH_SIZE) + 1,
+        batchSize: batch.length,
+        progress: `${batchProgress}%`,
+      })
 
       // Generate embeddings for this batch
       const embeddingPromises = batch.map(async (chunk, index) => {
@@ -303,6 +370,17 @@ export async function processDocument({
           }
 
           const embedding = await generateEmbedding(chunk)
+
+          // Validate embedding is not all zeros
+          if (embedding.every((v) => v === 0)) {
+            console.error("Skipping zero-vector embedding", {
+              documentId,
+              chunkIndex: i + index,
+              chunkSample: chunk.substring(0, 50) + "...",
+            })
+            failedEmbeddings++
+            return null
+          }
 
           successfulEmbeddings++
           return {
@@ -338,45 +416,71 @@ export async function processDocument({
 
       if (embeddings.length > 0) {
         // Store embeddings in Pinecone
-        await upsertVectors(embeddings)
-      }
+        console.log(`Processing document: Upserting vectors to Pinecone`, {
+          documentId,
+          batchNumber: Math.floor(i / BATCH_SIZE) + 1,
+          vectorCount: embeddings.length,
+        })
 
-      // Update progress
-      const progress = Math.min(50 + Math.floor(((i + batch.length) / chunks.length) * 40), 90)
-      await updateDocumentStatus(documentId, "processing", progress)
+        try {
+          const upsertResult = await upsertVectors(embeddings)
+          totalVectorsInserted += embeddings.length
+
+          console.log(`Processing document: Vectors upserted successfully`, {
+            documentId,
+            batchNumber: Math.floor(i / BATCH_SIZE) + 1,
+            vectorsInserted: embeddings.length,
+            upsertResult,
+          })
+        } catch (upsertError) {
+          console.error(`Error upserting vectors to Pinecone`, {
+            documentId,
+            batchNumber: Math.floor(i / BATCH_SIZE) + 1,
+            error: upsertError instanceof Error ? upsertError.message : "Unknown error",
+          })
+          failedEmbeddings += embeddings.length
+        }
+      } else {
+        console.warn(`Processing document: No valid embeddings in batch`, {
+          documentId,
+          batchNumber: Math.floor(i / BATCH_SIZE) + 1,
+        })
+      }
     }
 
     // 4. Update document status based on embedding results
     if (successfulEmbeddings === 0) {
-      await updateDocumentStatus(
-        documentId,
-        "failed",
-        0,
-        `Document processing failed: Could not generate any valid embeddings from ${chunks.length} chunks`,
-      )
-      return false
-    } else if (failedEmbeddings > 0) {
-      // Partial success
-      await updateDocumentStatus(
-        documentId,
-        "indexed",
-        100,
-        `Document indexed with warnings: ${successfulEmbeddings} chunks processed successfully, ${failedEmbeddings} chunks skipped`,
-      )
-    } else {
-      // Complete success
-      await updateDocumentStatus(documentId, "indexed", 100)
+      const errorMessage = `Document processing failed: Could not generate any valid embeddings from ${chunks.length} chunks`
+      console.error(errorMessage, { documentId })
+      return {
+        success: false,
+        chunksProcessed: chunks.length,
+        vectorsInserted: 0,
+        error: errorMessage,
+      }
     }
 
-    return true
-  } catch (error) {
-    console.error("Error processing document:", error)
-    await updateDocumentStatus(
+    console.log(`Processing document: Complete`, {
       documentId,
-      "failed",
-      0,
-      error instanceof Error ? error.message : "Unknown error occurred",
-    )
-    return false
+      totalChunks: chunks.length,
+      successfulEmbeddings,
+      failedEmbeddings,
+      totalVectorsInserted,
+    })
+
+    return {
+      success: true,
+      chunksProcessed: chunks.length,
+      vectorsInserted: totalVectorsInserted,
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "Unknown error occurred"
+    console.error("Error processing document:", error, { documentId })
+    return {
+      success: false,
+      chunksProcessed: 0,
+      vectorsInserted: 0,
+      error: errorMessage,
+    }
   }
 }
