@@ -305,7 +305,10 @@ export async function generateResponse(
 
     // 2. Get conversation history
     const history = await getMessagesByConversationId(conversationId)
-    const recentHistory = history.slice(-MAX_HISTORY_MESSAGES).map((msg) => ({ role: msg.role, content: msg.content }))
+    const recentHistory = history.slice(-MAX_HISTORY_MESSAGES).map((msg) => ({
+      role: msg.role,
+      content: msg.content,
+    }))
 
     // 3. Create system message with context
     const systemMessage = `${SYSTEM_PROMPT}
@@ -313,31 +316,47 @@ export async function generateResponse(
 Context:
 ${context.map((item) => `${item.content} [Document: ${item.documentName}]`).join("\n\n")}`
 
-    // 4. Generate response
-    const { text: responseContent } = await generateText({
-      model: openai("gpt-4o"),
-      system: systemMessage,
-      prompt: userMessage,
-      messages: recentHistory,
-    })
+    // 4. Generate response using AI SDK's generateText
+    // This properly handles the messages format internally
+    try {
+      console.log("Generating response with AI SDK...")
 
-    // Extract unique document names from context
-    const sources: string[] = []
-    context.forEach((item) => {
-      if (!sources.includes(item.documentName)) {
-        sources.push(item.documentName)
+      const { text: responseContent } = await generateText({
+        model: openai("gpt-4o"),
+        system: systemMessage,
+        messages: recentHistory,
+        temperature: 0.7,
+        maxTokens: 1000,
+      })
+
+      // Extract unique document names from context
+      const sources: string[] = []
+      context.forEach((item) => {
+        if (!sources.includes(item.documentName)) {
+          sources.push(item.documentName)
+        }
+      })
+
+      // 5. Save assistant response
+      const assistantMessage = await createMessage({
+        conversationId,
+        role: "assistant",
+        content: responseContent,
+        sources,
+      })
+
+      return assistantMessage
+    } catch (error) {
+      console.error("Error in OpenAI API call:", error)
+
+      // Log detailed error information
+      if (error.response) {
+        console.error("OpenAI API Error Status:", error.response.status)
+        console.error("OpenAI API Error Data:", error.response.data)
       }
-    })
 
-    // 5. Save assistant response
-    const assistantMessage = await createMessage({
-      conversationId,
-      role: "assistant",
-      content: responseContent,
-      sources,
-    })
-
-    return assistantMessage
+      throw new Error(`OpenAI API error: ${error.message}`)
+    }
   } catch (error) {
     console.error("Error generating response:", error)
     throw error

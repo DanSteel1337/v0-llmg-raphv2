@@ -31,21 +31,40 @@ export const GET = withErrorHandling(async (request: NextRequest) => {
 
 export const POST = withErrorHandling(async (request: NextRequest) => {
   return handleApiRequest(async () => {
-    const body = await request.json()
+    try {
+      const body = await request.json()
 
-    validateRequiredFields(body, ["conversationId", "content", "userId"])
-    const { conversationId, content, userId } = body
+      validateRequiredFields(body, ["conversationId", "content", "userId"])
+      const { conversationId, content, userId } = body
 
-    // Create user message
-    await createMessage({
-      conversationId,
-      role: "user",
-      content,
-    })
+      console.log(`Processing chat message for conversation ${conversationId}`)
 
-    // Generate AI response
-    const response = await generateResponse(conversationId, content, userId)
+      // Create user message
+      await createMessage({
+        conversationId,
+        role: "user",
+        content,
+      })
 
-    return { message: response }
+      // Generate AI response
+      try {
+        const response = await generateResponse(conversationId, content, userId)
+        return { message: response }
+      } catch (error) {
+        console.error("Error generating AI response:", error)
+
+        // Provide a more descriptive error message
+        if (error.message && error.message.includes("prompt and messages")) {
+          throw new Error(
+            "OpenAI API validation error: Cannot use both 'prompt' and 'messages' parameters. This has been fixed in the latest version.",
+          )
+        }
+
+        throw new Error(`Failed to generate AI response: ${error.message}`)
+      }
+    } catch (error) {
+      console.error("Chat API error:", error)
+      throw error
+    }
   })
 })
