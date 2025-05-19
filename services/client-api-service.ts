@@ -6,6 +6,7 @@
  */
 
 import type { Document, SearchResult, SearchOptions, Conversation, ChatMessage, AnalyticsData } from "@/types"
+import { isValidDocument } from "@/lib/utils/validators"
 
 /**
  * Base API call function with error handling
@@ -53,7 +54,7 @@ export async function uploadDocument(
   onProgress?: (progress: number) => void,
 ): Promise<Document> {
   // First, create a document record
-  const { document } = await apiCall<{ document: Document }>("/api/documents", {
+  const response = await apiCall<{ document: Document }>("/api/documents", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -67,10 +68,29 @@ export async function uploadDocument(
     }),
   })
 
-  // Add this validation and logging right after the above code
-  console.log("Document creation response:", document)
+  console.log("Document creation response:", response)
+
+  // Validate document response
+  if (!response?.document) {
+    throw new Error("Document upload failed: Invalid response format")
+  }
+
+  const { document } = response
+
   if (!document?.id) {
+    console.error("Invalid document response - missing ID:", document)
     throw new Error("Document upload failed: Missing document ID in response")
+  }
+
+  if (!document?.file_path) {
+    console.error("Invalid document response - missing file_path:", document)
+    throw new Error("Document upload failed: Missing file path in response")
+  }
+
+  // Additional validation using the utility function
+  if (!isValidDocument(document)) {
+    console.error("Invalid document response - failed validation:", document)
+    throw new Error("Document upload failed: Invalid document format")
   }
 
   // Then, upload the file

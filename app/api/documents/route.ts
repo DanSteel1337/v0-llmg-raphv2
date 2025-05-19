@@ -12,6 +12,7 @@ import type { NextRequest } from "next/server"
 import { getDocumentsByUserId, createDocument } from "@/services/document-service"
 import { handleApiRequest, validateRequiredFields } from "@/lib/api-utils"
 import { withErrorHandling } from "@/lib/error-handler"
+import { isValidDocument } from "@/lib/utils/validators"
 
 // Ensure the Edge runtime is declared
 export const runtime = "edge"
@@ -60,6 +61,18 @@ export const POST = withErrorHandling(async (request: NextRequest) => {
       const { userId, name, description, fileType, fileSize, filePath } = body
 
       const document = await createDocument(userId, name, description, fileType, fileSize, filePath)
+
+      // Validate document after creation
+      if (!document?.id) {
+        console.error("POST /api/documents - Failed to create document: Missing document ID", { document })
+        throw new Error("Failed to create document: Missing document ID")
+      }
+
+      if (!isValidDocument(document)) {
+        console.error("POST /api/documents - Invalid document format", { document })
+        throw new Error("Failed to create document: Invalid document format")
+      }
+
       console.log(`POST /api/documents - Successfully created document`, {
         userId,
         documentId: document.id,
