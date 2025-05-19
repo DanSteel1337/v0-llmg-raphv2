@@ -124,7 +124,7 @@ export function ChatWidget({ userId }: ChatWidgetProps) {
               New Conversation
             </button>
 
-            {conversations.length > 0 ? (
+            {conversations && conversations.length > 0 ? (
               <ul className="divide-y divide-gray-200">
                 {conversations.slice(0, 3).map((conversation) => (
                   <li key={conversation.id}>
@@ -160,7 +160,7 @@ export function ChatWidget({ userId }: ChatWidgetProps) {
                 ← Back to conversations
               </button>
               <span className="text-sm font-medium">
-                {conversations.find((c) => c.id === activeConversationId)?.title || "Conversation"}
+                {(conversations && conversations.find((c) => c.id === activeConversationId)?.title) || "Conversation"}
               </span>
             </div>
 

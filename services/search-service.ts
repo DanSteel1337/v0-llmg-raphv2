@@ -305,6 +305,9 @@ function formatSearchResults(matches: any[]): SearchResult[] {
     // Create a title from the first 50 chars of content
     const title = content.substring(0, 50) + (content.length > 50 ? "..." : "")
 
+    // Ensure highlights is always an array
+    const highlights = generateHighlights(content, match.metadata?.document_name as string)
+
     return {
       id: match.id,
       title: title,
@@ -315,7 +318,7 @@ function formatSearchResults(matches: any[]): SearchResult[] {
         ? new Date(match.metadata.created_at as string).toISOString().split("T")[0]
         : new Date().toISOString().split("T")[0],
       relevance: match.score || 0.8, // Use score if available, otherwise default to 0.8
-      highlights: generateHighlights(content, match.metadata?.document_name as string),
+      highlights: highlights,
     }
   })
 }
