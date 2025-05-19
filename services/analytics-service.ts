@@ -9,59 +9,95 @@
  * - @/lib/pinecone-rest-client.ts for vector database access
  */
 
-import { getIndexStats } from "@/lib/pinecone-rest-client"
+import { queryVectors } from "@/lib/pinecone-rest-client"
+import { VECTOR_DIMENSION } from "@/lib/embedding-config"
 import type { AnalyticsData } from "@/types"
 
+// Maximum number of vectors to retrieve for counting
+const MAX_VECTORS_PER_QUERY = 10000
+
 /**
- * Gets analytics data for a user
+ * Gets analytics data for a user using a safe approach compatible with Pinecone Serverless
  */
 export async function getAnalyticsData(userId: string): Promise<AnalyticsData> {
   console.log(`Getting analytics data for user ${userId}`)
 
   try {
-    // Get document count from Pinecone
-    const documentStats = await getIndexStats({
-      filter: {
+    // Create a zero vector with the correct dimension for querying
+    const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+
+    // Initialize counters
+    let documentCount = 0
+    let searchCount = 0
+    let chatCount = 0
+    let chunkCount = 0
+
+    // Get document count using queryVectors instead of describeIndexStats
+    try {
+      const documentResponse = await queryVectors(zeroVector, MAX_VECTORS_PER_QUERY, true, {
         user_id: { $eq: userId },
         record_type: { $eq: "document" },
-      },
-    })
+      })
 
-    const documentCount = documentStats.namespaces?.[""]?.vectorCount || 0
-    console.log(`Document count for user ${userId}: ${documentCount}`)
+      documentCount = documentResponse.matches?.length || 0
+      console.log(`Document count for user ${userId}: ${documentCount}`)
+    } catch (error) {
+      console.warn(`Error getting document count for user ${userId}:`, error)
+      // Continue with zero count as fallback
+    }
 
-    // Get search count from Pinecone
-    const searchStats = await getIndexStats({
-      filter: {
+    // Get search count using queryVectors
+    try {
+      const searchResponse = await queryVectors(zeroVector, MAX_VECTORS_PER_QUERY, true, {
         user_id: { $eq: userId },
         record_type: { $eq: "search_history" },
-      },
-    })
+      })
 
-    const searchCount = searchStats.namespaces?.[""]?.vectorCount || 0
-    console.log(`Search count for user ${userId}: ${searchCount}`)
+      searchCount = searchResponse.matches?.length || 0
+      console.log(`Search count for user ${userId}: ${searchCount}`)
+    } catch (error) {
+      console.warn(`Error getting search count for user ${userId}:`, error)
+      // Continue with zero count as fallback
+    }
 
-    // Get chat count from Pinecone
-    const chatStats = await getIndexStats({
-      filter: {
+    // Get chat count using queryVectors
+    try {
+      const chatResponse = await queryVectors(zeroVector, MAX_VECTORS_PER_QUERY, true, {
         user_id: { $eq: userId },
         record_type: { $eq: "conversation" },
-      },
-    })
+      })
 
-    const chatCount = chatStats.namespaces?.[""]?.vectorCount || 0
-    console.log(`Chat count for user ${userId}: ${chatCount}`)
+      chatCount = chatResponse.matches?.length || 0
+      console.log(`Chat count for user ${userId}: ${chatCount}`)
+    } catch (error) {
+      console.warn(`Error getting chat count for user ${userId}:`, error)
+      // Continue with zero count as fallback
+    }
 
-    // Get chunk count from Pinecone
-    const chunkStats = await getIndexStats({
-      filter: {
+    // Get chunk count using queryVectors
+    try {
+      const chunkResponse = await queryVectors(zeroVector, MAX_VECTORS_PER_QUERY, true, {
         user_id: { $eq: userId },
         record_type: { $eq: "chunk" },
-      },
-    })
+      })
 
-    const chunkCount = chunkStats.namespaces?.[""]?.vectorCount || 0
-    console.log(`Chunk count for user ${userId}: ${chunkCount}`)
+      chunkCount = chunkResponse.matches?.length || 0
+      console.log(`Chunk count for user ${userId}: ${chunkCount}`)
+    } catch (error) {
+      console.warn(`Error getting chunk count for user ${userId}:`, error)
+      // Continue with zero count as fallback
+    }
+
+    // Add a warning log if any count is equal to MAX_VECTORS_PER_QUERY
+    // This indicates we might be hitting the topK limit
+    if (
+      documentCount === MAX_VECTORS_PER_QUERY ||
+      searchCount === MAX_VECTORS_PER_QUERY ||
+      chatCount === MAX_VECTORS_PER_QUERY ||
+      chunkCount === MAX_VECTORS_PER_QUERY
+    ) {
+      console.warn(`One or more counts may be truncated due to reaching the query limit of ${MAX_VECTORS_PER_QUERY}`)
+    }
 
     // Construct analytics data
     const analyticsData: AnalyticsData = {
@@ -77,6 +113,15 @@ export async function getAnalyticsData(userId: string): Promise<AnalyticsData> {
     return analyticsData
   } catch (error) {
     console.error(`Error getting analytics data for user ${userId}:`, error)
-    throw error
+
+    // Return fallback data with zeros instead of throwing
+    return {
+      documentCount: 0,
+      searchCount: 0,
+      chatCount: 0,
+      chunkCount: 0,
+      topDocuments: [],
+      topSearches: [],
+    }
   }
 }

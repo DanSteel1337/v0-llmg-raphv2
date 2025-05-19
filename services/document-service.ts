@@ -14,7 +14,7 @@
  */
 
 import { v4 as uuidv4 } from "uuid"
-import { upsertVectors, queryVectors, deleteVectors, getIndexStats } from "@/lib/pinecone-rest-client"
+import { upsertVectors, queryVectors, deleteVectors } from "@/lib/pinecone-rest-client"
 import { generateEmbedding } from "@/lib/embedding-service"
 import { chunkDocument } from "@/lib/chunking-utils"
 import { VECTOR_DIMENSION, EMBEDDING_MODEL } from "@/lib/embedding-config"
@@ -113,14 +113,27 @@ export async function getDocumentsByUserId(userId: string): Promise<Document[]> 
  */
 export async function getDocumentCountByUserId(userId: string): Promise<number> {
   try {
-    const stats = await getIndexStats({
-      filter: {
+    // Create a zero vector with the correct dimension
+    const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+
+    // Query Pinecone for documents with the specified user_id
+    const response = await queryVectors(
+      zeroVector,
+      10000, // Use a high limit, but be aware of potential truncation
+      true,
+      {
         user_id: { $eq: userId },
         record_type: { $eq: "document" },
       },
-    })
+    )
 
-    return stats.namespaces?.[""]?.vectorCount || 0
+    // Handle potential error from Pinecone
+    if ("error" in response && response.error) {
+      console.error("Error getting document count from Pinecone:", response)
+      return 0 // Return 0 as fallback
+    }
+
+    return response.matches?.length || 0
   } catch (error) {
     console.error("Error getting document count:", error)
     return 0

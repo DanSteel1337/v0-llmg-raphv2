@@ -11,7 +11,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { FileText, Search, MessageSquare, Database, AlertCircle } from "lucide-react"
+import { FileText, Search, MessageSquare, Database, AlertCircle, Info } from "lucide-react"
 import { DashboardCard } from "@/components/ui/dashboard-card"
 import { useAnalytics } from "@/hooks/use-analytics"
 import { useToast } from "@/components/toast"
@@ -19,6 +19,9 @@ import { useToast } from "@/components/toast"
 interface AnalyticsWidgetProps {
   userId: string
 }
+
+// Maximum number of vectors per query - should match the value in analytics-service.ts
+const MAX_VECTORS_PER_QUERY = 10000
 
 export function AnalyticsWidget({ userId }: AnalyticsWidgetProps) {
   const { analytics, isLoading, error, refreshAnalytics } = useAnalytics(userId)
@@ -50,6 +53,13 @@ export function AnalyticsWidget({ userId }: AnalyticsWidgetProps) {
     chunkCount: analytics?.chunkCount || 0,
   }
 
+  // Check if any count might be truncated
+  const mightBeTruncated =
+    metrics.documentCount === MAX_VECTORS_PER_QUERY ||
+    metrics.searchCount === MAX_VECTORS_PER_QUERY ||
+    metrics.chatCount === MAX_VECTORS_PER_QUERY ||
+    metrics.chunkCount === MAX_VECTORS_PER_QUERY
+
   return (
     <DashboardCard title="Analytics" description="Key metrics and usage statistics" isLoading={isLoading}>
       <div className="space-y-4">
@@ -65,6 +75,15 @@ export function AnalyticsWidget({ userId }: AnalyticsWidgetProps) {
           </div>
         )}
 
+        {mightBeTruncated && (
+          <div className="bg-yellow-50 border border-yellow-200 text-yellow-700 px-4 py-3 rounded-md mb-4">
+            <div className="flex items-center">
+              <Info className="h-5 w-5 mr-2" />
+              <span>Some counts may be truncated due to large data volume.</span>
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="bg-blue-50 p-4 rounded-lg">
             <div className="flex items-center">
@@ -73,7 +92,10 @@ export function AnalyticsWidget({ userId }: AnalyticsWidgetProps) {
               </div>
             </div>
             <p className="mt-2 text-sm font-medium text-gray-500">Documents</p>
-            <p className="text-2xl font-semibold text-gray-900">{metrics.documentCount}</p>
+            <p className="text-2xl font-semibold text-gray-900">
+              {metrics.documentCount}
+              {metrics.documentCount === MAX_VECTORS_PER_QUERY && "+"}
+            </p>
           </div>
 
           <div className="bg-green-50 p-4 rounded-lg">
@@ -83,7 +105,10 @@ export function AnalyticsWidget({ userId }: AnalyticsWidgetProps) {
               </div>
             </div>
             <p className="mt-2 text-sm font-medium text-gray-500">Searches</p>
-            <p className="text-2xl font-semibold text-gray-900">{metrics.searchCount}</p>
+            <p className="text-2xl font-semibold text-gray-900">
+              {metrics.searchCount}
+              {metrics.searchCount === MAX_VECTORS_PER_QUERY && "+"}
+            </p>
           </div>
 
           <div className="bg-purple-50 p-4 rounded-lg">
@@ -93,7 +118,10 @@ export function AnalyticsWidget({ userId }: AnalyticsWidgetProps) {
               </div>
             </div>
             <p className="mt-2 text-sm font-medium text-gray-500">Chats</p>
-            <p className="text-2xl font-semibold text-gray-900">{metrics.chatCount}</p>
+            <p className="text-2xl font-semibold text-gray-900">
+              {metrics.chatCount}
+              {metrics.chatCount === MAX_VECTORS_PER_QUERY && "+"}
+            </p>
           </div>
 
           <div className="bg-amber-50 p-4 rounded-lg">
@@ -103,7 +131,10 @@ export function AnalyticsWidget({ userId }: AnalyticsWidgetProps) {
               </div>
             </div>
             <p className="mt-2 text-sm font-medium text-gray-500">Chunks</p>
-            <p className="text-2xl font-semibold text-gray-900">{metrics.chunkCount}</p>
+            <p className="text-2xl font-semibold text-gray-900">
+              {metrics.chunkCount}
+              {metrics.chunkCount === MAX_VECTORS_PER_QUERY && "+"}
+            </p>
           </div>
         </div>
       </div>

@@ -10,7 +10,7 @@
 
 import type { NextRequest } from "next/server"
 import { getAnalyticsData } from "@/services/analytics-service"
-import { handleApiRequest, extractUserId } from "@/lib/api-utils"
+import { handleApiRequest, extractUserId, createSuccessResponse } from "@/lib/api-utils"
 import { withErrorHandling } from "@/lib/error-handler"
 
 export const runtime = "edge"
@@ -38,7 +38,16 @@ export const GET = withErrorHandling(async (request: NextRequest) => {
         stack: error instanceof Error ? error.stack : undefined,
         url: request.url,
       })
-      throw error
+
+      // Return fallback data instead of throwing
+      return createSuccessResponse({
+        documentCount: 0,
+        searchCount: 0,
+        chatCount: 0,
+        chunkCount: 0,
+        topDocuments: [],
+        topSearches: [],
+      })
     }
   })
 })
