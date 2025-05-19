@@ -87,10 +87,25 @@ export async function uploadDocument(
   formData.append("documentId", document.id)
   formData.append("filePath", document.file_path)
 
-  await apiCall<{ success: boolean }>("/api/documents/upload", {
-    method: "POST",
-    body: formData,
-  })
+  try {
+    const uploadResponse = await fetch("/api/documents/upload", {
+      method: "POST",
+      body: formData,
+    })
+
+    if (uploadResponse.status === 405) {
+      throw new Error("Upload failed: endpoint does not support this method.")
+    }
+
+    if (!uploadResponse.ok) {
+      throw new Error(`Upload failed with status ${uploadResponse.status}: ${uploadResponse.statusText}`)
+    }
+
+    await uploadResponse.json()
+  } catch (error) {
+    console.error("File upload error:", error)
+    throw new Error(`File upload failed: ${error instanceof Error ? error.message : "Unknown error"}`)
+  }
 
   // Poll for document status updates
   if (onProgress) {

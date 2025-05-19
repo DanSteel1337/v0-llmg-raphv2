@@ -22,59 +22,12 @@ export const getEmbeddingConfig = () => {
     }
   }
 
-  const model = process.env.EMBEDDING_MODEL
-  const indexName = process.env.PINECONE_INDEX_NAME
-  const host = process.env.PINECONE_HOST
-
-  // Validate required environment variables
-  const missingVars = []
-  if (!model) missingVars.push("EMBEDDING_MODEL")
-  if (!indexName) missingVars.push("PINECONE_INDEX_NAME")
-  if (!host) missingVars.push("PINECONE_HOST")
-
-  if (missingVars.length > 0) {
-    throw new Error(`[EmbeddingConfig] Missing required env vars: ${missingVars.join(", ")}`)
-  }
-
-  // Validate model
-  if (model !== "text-embedding-3-large") {
-    throw new Error(`[EmbeddingConfig] Unsupported model: ${model}. Only text-embedding-3-large is supported.`)
-  }
-
-  // Validate host format
-  if (!host.startsWith("https://")) {
-    throw new Error(`[EmbeddingConfig] Invalid PINECONE_HOST format: ${host}. Must start with https://`)
-  }
-
-  // Extract index slug from host and validate it matches indexName
-  const hostParts = host.split(".")
-  if (hostParts.length < 2) {
-    throw new Error(`[EmbeddingConfig] Invalid PINECONE_HOST format: ${host}`)
-  }
-
-  const hostIndexSlug = hostParts[0].split("//")[1]
-  if (!hostIndexSlug || !hostIndexSlug.includes(indexName.toLowerCase())) {
-    console.warn(
-      `[EmbeddingConfig] Warning: PINECONE_INDEX_NAME (${indexName}) may not match host index slug (${hostIndexSlug})`,
-    )
-  }
-
-  // Fixed dimensions for text-embedding-3-large
-  const dimensions = 3072
-
-  // Log the configuration
-  console.log("[EmbeddingConfig] Configuration initialized:", {
-    model,
-    indexName,
-    host: host.split(".")[0], // Only log the first part for security
-    dimensions,
-  })
-
+  // Minimal, hardcoded server-only configuration for embedding model and Pinecone.
   return {
-    model,
-    indexName,
-    host,
-    dimensions,
+    model: "text-embedding-3-large",
+    dimensions: 3072,
+    indexName: process.env.PINECONE_INDEX_NAME!,
+    host: process.env.PINECONE_HOST!,
     isClientSide: false,
   }
 }
@@ -100,8 +53,8 @@ try {
 }
 
 // Export the configuration values
-export const EMBEDDING_MODEL = config.model
-export const VECTOR_DIMENSION = config.dimensions
+export const EMBEDDING_MODEL = "text-embedding-3-large"
+export const VECTOR_DIMENSION = 3072
 export const INDEX_NAME = config.indexName
 export const PINECONE_HOST = config.host
 export const IS_CLIENT_SIDE = config.isClientSide
