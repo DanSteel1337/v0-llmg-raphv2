@@ -48,7 +48,9 @@ export async function getSearchCountByUserId(userId: string): Promise<number> {
       return 0 // Return 0 as fallback
     }
 
-    return response.matches?.length || 0
+    // Ensure matches is an array before accessing length
+    const matches = Array.isArray(response.matches) ? response.matches : []
+    return matches.length
   } catch (error) {
     console.error("Error getting search count:", error)
     return 0
@@ -76,12 +78,16 @@ export async function performSearch(query: string, userId: string, options: Sear
         }),
       ])
 
+      // Ensure both results are arrays
+      const safeSemanticResults = Array.isArray(semanticResults) ? semanticResults : []
+      const safeKeywordResults = Array.isArray(keywordResults) ? keywordResults : []
+
       // Combine and deduplicate results
-      const combinedResults = [...semanticResults]
-      const semanticIds = new Set(semanticResults.map((result) => result.id))
+      const combinedResults = [...safeSemanticResults]
+      const semanticIds = new Set(safeSemanticResults.map((result) => result.id))
 
       // Add keyword results that aren't already in semantic results
-      for (const result of keywordResults) {
+      for (const result of safeKeywordResults) {
         if (!semanticIds.has(result.id)) {
           combinedResults.push(result)
         }
@@ -100,14 +106,16 @@ export async function performSearch(query: string, userId: string, options: Sear
       // Log search query for analytics
       await logSearchQuery(userId, query, "semantic", options)
 
-      return results
+      // Ensure results is an array
+      return Array.isArray(results) ? results : []
     } else {
       const results = await keywordSearch(query, userId, options)
 
       // Log search query for analytics
       await logSearchQuery(userId, query, "keyword", options)
 
-      return results
+      // Ensure results is an array
+      return Array.isArray(results) ? results : []
     }
   } catch (error) {
     console.error(`Search error (${options.type}):`, error)
@@ -194,10 +202,12 @@ async function semanticSearch(query: string, userId: string, options: SearchOpti
       return [] // Return empty array as fallback
     }
 
-    console.log("Pinecone query completed", { matchCount: response.matches?.length || 0 })
+    // Ensure matches is an array before accessing
+    const matches = Array.isArray(response.matches) ? response.matches : []
+    console.log("Pinecone query completed", { matchCount: matches.length })
 
     // Format results
-    return formatSearchResults(response.matches || [])
+    return formatSearchResults(matches)
   } catch (error) {
     console.error("Error performing semantic search:", error)
     throw error
@@ -253,7 +263,9 @@ async function keywordSearch(query: string, userId: string, options: SearchOptio
       return [] // Return empty array as fallback
     }
 
-    console.log("Pinecone query completed", { totalChunks: response.matches?.length || 0 })
+    // Ensure matches is an array before accessing
+    const matches = Array.isArray(response.matches) ? response.matches : []
+    console.log("Pinecone query completed", { totalChunks: matches.length })
 
     // Filter chunks that contain the query keywords
     const keywords = query
@@ -262,7 +274,7 @@ async function keywordSearch(query: string, userId: string, options: SearchOptio
       .filter((k) => k.length > 1)
     console.log("Filtering chunks by keywords", { keywords })
 
-    const filteredChunks = (response.matches || []).filter((match) => {
+    const filteredChunks = matches.filter((match) => {
       const content = ((match.metadata?.content as string) || "").toLowerCase()
       return keywords.some((keyword) => content.includes(keyword))
     })
@@ -287,7 +299,9 @@ async function keywordSearch(query: string, userId: string, options: SearchOptio
     })
 
     // Format results (take top 10)
-    return formatSearchResults(filteredChunks.slice(0, DEFAULT_TOP_K))
+    // Ensure filteredChunks is an array before slicing
+    const safeFilteredChunks = Array.isArray(filteredChunks) ? filteredChunks : []
+    return formatSearchResults(safeFilteredChunks.slice(0, DEFAULT_TOP_K))
   } catch (error) {
     console.error("Error performing keyword search:", error)
     throw error
@@ -298,6 +312,7 @@ async function keywordSearch(query: string, userId: string, options: SearchOptio
  * Formats search results from Pinecone matches
  */
 function formatSearchResults(matches: any[]): SearchResult[] {
+  // Ensure matches is an array
   if (!Array.isArray(matches)) {
     console.error("formatSearchResults received non-array input:", matches)
     return []

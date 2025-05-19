@@ -30,6 +30,10 @@ export function SearchWidget({ userId, recentSearches = [] }: SearchWidgetProps)
   const { addToast } = useToast()
   const [searchError, setSearchError] = useState<string | null>(null)
 
+  // Ensure results and recentSearches are always arrays
+  const safeResults = Array.isArray(results) ? results : []
+  const safeRecentSearches = Array.isArray(recentSearches) ? recentSearches : []
+
   // Debounce search query
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -84,11 +88,8 @@ export function SearchWidget({ userId, recentSearches = [] }: SearchWidgetProps)
     }
   }
 
-  // Ensure results is always an array
-  const safeResults = Array.isArray(results) ? results : []
-
-  // Ensure recentSearches is always an array
-  const safeRecentSearches = Array.isArray(recentSearches) ? recentSearches : []
+  // Get the recent searches safely
+  const recentSearchItems = safeRecentSearches.slice(0, 3)
 
   return (
     <DashboardCard title="Search" description="Search across your documents" isLoading={false}>
@@ -212,7 +213,7 @@ export function SearchWidget({ userId, recentSearches = [] }: SearchWidgetProps)
           <div>
             <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">Recent Searches</h4>
             <ul className="space-y-1">
-              {safeRecentSearches.slice(0, 3).map((search, index) => (
+              {recentSearchItems.map((search, index) => (
                 <li key={index}>
                   <button
                     onClick={() => handleRecentSearch(search)}

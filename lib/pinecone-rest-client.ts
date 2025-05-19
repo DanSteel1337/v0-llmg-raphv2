@@ -113,7 +113,8 @@ export async function upsertVectors(vectors: any[], namespace = "") {
     let totalUpserted = 0
 
     for (let i = 0; i < validVectors.length; i += BATCH_SIZE) {
-      const batch = validVectors.slice(i, i + BATCH_SIZE)
+      // Ensure validVectors is an array before slicing
+      const batch = Array.isArray(validVectors) ? validVectors.slice(i, i + BATCH_SIZE) : []
 
       const response = await fetchWithRetry(`${host}/vectors/upsert`, {
         method: "POST",
@@ -223,13 +224,21 @@ export async function deleteVectors(ids: string[], namespace = "") {
   try {
     const { apiKey, host } = getPineconeClient()
 
+    // Ensure ids is an array before proceeding
+    const safeIds = Array.isArray(ids) ? ids : []
+
+    if (safeIds.length === 0) {
+      console.warn("No valid IDs to delete")
+      return { deletedCount: 0 }
+    }
+
     const response = await fetchWithRetry(`${host}/vectors/delete`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Api-Key": apiKey,
       },
-      body: JSON.stringify({ ids, namespace }),
+      body: JSON.stringify({ ids: safeIds, namespace }),
     })
 
     if (!response.ok) {
@@ -239,7 +248,7 @@ export async function deleteVectors(ids: string[], namespace = "") {
 
     const result = await response.json()
     console.log(`Successfully deleted vectors`, {
-      deletedCount: ids.length,
+      deletedCount: safeIds.length,
       namespace: namespace || "default",
       result,
     })

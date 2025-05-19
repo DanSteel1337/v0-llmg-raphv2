@@ -51,7 +51,10 @@ export function DocumentWidget({ userId, limit = 5 }: DocumentWidgetProps) {
     refreshDocuments()
   }
 
-  const recentDocuments = documents.slice(0, limit)
+  // Ensure documents is always an array
+  const safeDocuments = Array.isArray(documents) ? documents : []
+  // Get the recent documents safely
+  const recentDocuments = safeDocuments.slice(0, limit)
 
   const handleUploadClick = () => {
     fileInputRef.current?.click()

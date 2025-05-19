@@ -39,9 +39,6 @@ export function ChatWidget({ userId }: ChatWidgetProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const { addToast } = useToast()
 
-  // Ensure conversations is always an array
-  const safeConversations = Array.isArray(conversations) ? conversations : []
-
   // Handle API errors
   useEffect(() => {
     if (conversationsError) {
@@ -102,6 +99,11 @@ export function ChatWidget({ userId }: ChatWidgetProps) {
     setActiveConversationId(undefined)
   }
 
+  // Ensure conversations is always an array
+  const safeConversations = Array.isArray(conversations) ? conversations : []
+  // Get the first 3 conversations safely
+  const recentConversations = safeConversations.slice(0, 3)
+
   return (
     <DashboardCard title="Chat" description="Ask questions about your documents" isLoading={isLoadingConversations}>
       <div className="space-y-4">
@@ -129,7 +131,7 @@ export function ChatWidget({ userId }: ChatWidgetProps) {
 
             {safeConversations.length > 0 ? (
               <ul className="divide-y divide-gray-200">
-                {safeConversations.slice(0, 3).map((conversation) => (
+                {recentConversations.map((conversation) => (
                   <li key={conversation.id}>
                     <button
                       onClick={() => handleOpenChat(conversation)}

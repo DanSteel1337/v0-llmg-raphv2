@@ -87,7 +87,9 @@ export async function getConversationCountByUserId(userId: string): Promise<numb
       return 0 // Return 0 as fallback
     }
 
-    return response.matches?.length || 0
+    // Ensure matches is an array before accessing length
+    const matches = Array.isArray(response.matches) ? response.matches : []
+    return matches.length
   } catch (error) {
     console.error("Error getting conversation count:", error)
     return 0
@@ -117,7 +119,10 @@ export async function getConversationsByUserId(userId: string): Promise<Conversa
     return [] // Return empty array as fallback
   }
 
-  return (response.matches || []).map((match) => ({
+  // Ensure matches is an array before mapping
+  const matches = Array.isArray(response.matches) ? response.matches : []
+
+  return matches.map((match) => ({
     id: match.id,
     user_id: match.metadata?.user_id as string,
     title: match.metadata?.title as string,
@@ -150,11 +155,14 @@ export async function getConversationById(id: string): Promise<Conversation | nu
     return null // Return null as fallback
   }
 
-  if (!response.matches || response.matches.length === 0) {
+  // Ensure matches is an array before checking length
+  const matches = Array.isArray(response.matches) ? response.matches : []
+
+  if (matches.length === 0) {
     return null
   }
 
-  const match = response.matches[0]
+  const match = matches[0]
 
   return {
     id: match.id,
@@ -222,8 +230,11 @@ export async function deleteConversation(id: string): Promise<void> {
   )
 
   // Delete all messages
-  if (response.matches && response.matches.length > 0) {
-    const messageIds = response.matches.map((match) => match.id)
+  // Ensure matches is an array before checking length
+  const matches = Array.isArray(response.matches) ? response.matches : []
+
+  if (matches.length > 0) {
+    const messageIds = matches.map((match) => match.id)
     await deleteVectors(messageIds)
   }
 }
@@ -251,7 +262,10 @@ export async function getMessagesByConversationId(conversationId: string): Promi
     return [] // Return empty array as fallback
   }
 
-  const messages = (response.matches || []).map((match) => ({
+  // Ensure matches is an array before mapping
+  const matches = Array.isArray(response.matches) ? response.matches : []
+
+  const messages = matches.map((match) => ({
     id: match.id,
     conversation_id: match.metadata?.conversation_id as string,
     role: match.metadata?.role as "user" | "assistant" | "system",
@@ -341,23 +355,30 @@ export async function generateResponse(
 
     // 2. Get conversation history
     const history = await getMessagesByConversationId(conversationId)
-    const recentHistory = history.slice(-MAX_HISTORY_MESSAGES).map((msg) => ({
+
+    // Ensure history is an array before slicing
+    const safeHistory = Array.isArray(history) ? history : []
+
+    const recentHistory = safeHistory.slice(-MAX_HISTORY_MESSAGES).map((msg) => ({
       role: msg.role,
       content: msg.content,
     }))
 
     // 3. Create system message with context
+    // Ensure context is an array before mapping
+    const safeContext = Array.isArray(context) ? context : []
+
     const systemMessage = `${SYSTEM_PROMPT}
 
 Context:
-${context.map((item) => `${item.content} [Document: ${item.documentName}]`).join("\n\n")}`
+${safeContext.map((item) => `${item.content} [Document: ${item.documentName}]`).join("\n\n")}`
 
     // 4. Generate response using AI SDK's streamText
     try {
       console.log("Generating response with AI SDK streamText...")
 
       let responseContent = ""
-      const turnIndex = history.length
+      const turnIndex = safeHistory.length
 
       const result = await streamText({
         model: openai("gpt-4o"),
@@ -374,7 +395,7 @@ ${context.map((item) => `${item.content} [Document: ${item.documentName}]`).join
 
       // Extract unique document names from context
       const sources: string[] = []
-      context.forEach((item) => {
+      safeContext.forEach((item) => {
         if (!sources.includes(item.documentName)) {
           sources.push(item.documentName)
         }
@@ -427,8 +448,11 @@ async function retrieveRelevantContext(query: string, userId: string) {
       return [] // Return empty array as fallback
     }
 
+    // Ensure matches is an array before mapping
+    const matches = Array.isArray(response.matches) ? response.matches : []
+
     // Format results
-    return (response.matches || []).map((match) => ({
+    return matches.map((match) => ({
       content: match.metadata?.content as string,
       documentName: match.metadata?.document_name as string,
       score: match.score,

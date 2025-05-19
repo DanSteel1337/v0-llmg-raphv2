@@ -41,11 +41,6 @@ function isInformativeChunk(text: string): boolean {
  */
 export function chunkDocument(text: string, maxChunkSize: number, overlap = 100): string[] {
   // If text is smaller than max chunk size, return it as a single chunk
-  if (!text) {
-    console.warn("chunkDocument received empty text")
-    return []
-  }
-
   if (text.length <= maxChunkSize) {
     return isInformativeChunk(text) ? [text] : []
   }
@@ -110,10 +105,6 @@ export function splitTextIntoChunks(text: string, maxChunkSize: number, overlap 
   const chunks: string[] = []
 
   // If text is smaller than max chunk size, return it as a single chunk if informative
-  if (!text) {
-    return []
-  }
-
   if (text.length <= maxChunkSize) {
     return isInformativeChunk(text) ? [text] : []
   }
@@ -175,10 +166,6 @@ export function splitTextIntoChunks(text: string, maxChunkSize: number, overlap 
  * Splits text by headers to preserve document structure
  */
 export function splitByHeaders(text: string): { header?: string; content: string }[] {
-  if (!text) {
-    return [{ content: "" }]
-  }
-
   const headerRegex = /#{1,6}\s+(.+)$|^(.+)\n[=-]{2,}$/gm
   const sections: { header?: string; content: string }[] = []
 
