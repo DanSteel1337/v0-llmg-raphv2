@@ -27,6 +27,7 @@ export const POST = withErrorHandling(async (request: NextRequest) => {
       fileType,
     })
 
+    // Validate required fields
     if (!documentId) {
       throw new Error("Document ID is required")
     }

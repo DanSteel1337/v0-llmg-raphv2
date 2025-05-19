@@ -311,6 +311,14 @@ export async function processDocument({
   error?: string
 }> {
   try {
+    // Validate required parameters
+    if (!documentId) throw new Error("documentId is required")
+    if (!userId) throw new Error("userId is required")
+    if (!filePath) throw new Error("filePath is required")
+    if (!fileName) throw new Error("fileName is required")
+    if (!fileType) throw new Error("fileType is required")
+    if (!fileUrl) throw new Error("fileUrl is required")
+
     // Update document status to processing
     await updateDocumentStatus(documentId, "processing", 10, "Fetching document content")
 

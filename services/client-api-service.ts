@@ -20,112 +20,80 @@ export async function uploadDocument(
   file: File,
   onProgress?: (progress: number) => void,
 ): Promise<Document> {
-  // First, create a document record
-  const response = await apiCall<{ document: Document } | Document>("/api/documents", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      userId,
-      name: file.name,
-      fileType: file.type,
-      fileSize: file.size,
-      filePath: `${userId}/${Date.now()}-${file.name}`,
-    }),
-  })
-
-  // Log the response for debugging
-  console.log("Document creation response:", response)
-
-  // Handle both response formats: { document: {...} } or the document directly
-  let document: Document
-
-  if ("document" in response && response.document) {
-    // Response format is { document: {...} }
-    document = response.document
-  } else if ("id" in response && response.id) {
-    // Response format is the document directly
-    document = response as Document
-  } else {
-    console.error("Invalid document response format:", response)
-    throw new Error("Document upload failed: Invalid response format")
-  }
-
-  // Validate document ID
-  if (!document?.id || typeof document.id !== "string") {
-    console.error("Invalid document response - invalid ID:", document)
-    throw new Error("Document upload failed: Missing or invalid document ID")
-  }
-
-  // Validate file path
-  if (!document?.file_path || typeof document.file_path !== "string") {
-    console.error("Invalid document response - invalid file_path:", document)
-    throw new Error("Document upload failed: Missing or invalid file path")
-  }
-
-  // Then, upload the file
-  const formData = new FormData()
-  formData.append("file", file)
-  formData.append("userId", userId)
-  formData.append("documentId", document.id)
-  formData.append("filePath", document.file_path)
-
-  await apiCall<{ success: boolean }>("/api/documents/upload", {
-    method: "POST",
-    body: formData,
-  })
-
-  // Construct the file URL for processing
-  const fileUrl = `${window.location.origin}/api/documents/file?path=${encodeURIComponent(document.file_path)}`
-
-  // Trigger document processing
   try {
-    await apiCall<{ success: boolean }>("/api/documents/process", {
+    // First, create a document record
+    const docResponse = await apiCall<{ document: Document }>("/api/documents", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        documentId: document.id,
-        userId: userId,
-        filePath: document.file_path,
-        fileName: file.name,
+        userId,
+        name: file.name,
         fileType: file.type,
-        fileUrl: fileUrl,
+        fileSize: file.size,
+        filePath: `${userId}/${Date.now()}-${file.name}`,
       }),
     })
-  } catch (error) {
-    console.error("Error triggering document processing:", error)
-    // We don't throw here to avoid blocking the UI - the document is created and uploaded,
-    // but processing might have failed. The UI will show the document as "processing" or "failed".
-  }
 
-  // Poll for document status updates
-  if (onProgress) {
-    const pollInterval = setInterval(async () => {
-      try {
-        const documents = await fetchDocuments(userId)
-        const updatedDocument = documents.find((d) => d.id === document.id)
+    const document = docResponse?.document
+    if (!document?.id || !document?.file_path) {
+      throw new Error("Document creation failed: Missing document ID or file path")
+    }
 
-        if (updatedDocument) {
-          if (updatedDocument.status === "indexed" || updatedDocument.status === "failed") {
-            clearInterval(pollInterval)
-            onProgress(100)
-          } else if (updatedDocument.processing_progress !== undefined) {
-            onProgress(updatedDocument.processing_progress)
+    // Then, upload the file
+    const formData = new FormData()
+    formData.append("file", file)
+    formData.append("userId", userId)
+    formData.append("documentId", document.id)
+    formData.append("filePath", document.file_path)
+
+    await apiCall("/api/documents/upload", {
+      method: "POST",
+      body: formData,
+    })
+
+    // ✅ Process only after full upload
+    await apiCall("/api/documents/process", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        documentId: document.id,
+        userId,
+        filePath: document.file_path,
+        fileName: document.name,
+        fileType: document.file_type,
+        fileUrl: `${window.location.origin}/api/documents/file?path=${encodeURIComponent(document.file_path)}`,
+      }),
+    })
+
+    // Poll for document status updates
+    if (onProgress) {
+      const pollInterval = setInterval(async () => {
+        try {
+          const documents = await fetchDocuments(userId)
+          const updatedDocument = documents.find((d) => d.id === document.id)
+
+          if (updatedDocument) {
+            if (updatedDocument.status === "indexed" || updatedDocument.status === "failed") {
+              clearInterval(pollInterval)
+              onProgress(100)
+            } else if (updatedDocument.processing_progress !== undefined) {
+              onProgress(updatedDocument.processing_progress)
+            }
           }
+        } catch (error) {
+          console.error("Error polling document status:", error)
         }
-      } catch (error) {
-        console.error("Error polling document status:", error)
-      }
-    }, 2000)
+      }, 2000)
 
-    // Clean up interval after 5 minutes (max processing time)
-    setTimeout(() => clearInterval(pollInterval), 5 * 60 * 1000)
+      // Clean up interval after 5 minutes (max processing time)
+      setTimeout(() => clearInterval(pollInterval), 5 * 60 * 1000)
+    }
+
+    return document
+  } catch (error) {
+    console.error("Document upload failed:", error)
+    throw error
   }
-
-  return document
 }
 
 /**
@@ -232,6 +200,7 @@ interface Document {
   id: string
   name: string
   file_path: string
+  file_type: string
   status?: string
   processing_progress?: number
   [key: string]: any
