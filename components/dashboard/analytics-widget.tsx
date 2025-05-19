@@ -11,7 +11,18 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { FileText, Search, MessageSquare, Database, AlertCircle, Info } from "lucide-react"
+import {
+  FileText,
+  Search,
+  MessageSquare,
+  Database,
+  AlertCircle,
+  Info,
+  Check,
+  X,
+  ChevronDown,
+  ChevronUp,
+} from "lucide-react"
 import { DashboardCard } from "@/components/ui/dashboard-card"
 import { useAnalytics } from "@/hooks/use-analytics"
 import { useToast } from "@/components/toast"
@@ -20,13 +31,18 @@ interface AnalyticsWidgetProps {
   userId: string
 }
 
-// Maximum number of vectors per query - should match the value in analytics-service.ts
+// Maximum number of vectors per query
 const MAX_VECTORS_PER_QUERY = 10000
 
 export function AnalyticsWidget({ userId }: AnalyticsWidgetProps) {
-  const { analytics, isLoading, error, refreshAnalytics } = useAnalytics(userId)
+  const { analytics, isLoading, error, refreshAnalytics, pineconeApiHealthy, openaiApiHealthy, isCheckingHealth } =
+    useAnalytics(userId)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [showDebug, setShowDebug] = useState(false)
   const { addToast } = useToast()
+
+  // Check if we're in debug mode
+  const isDebugMode = typeof window !== "undefined" && window.location.search.includes("debug=true")
 
   // Handle API errors
   useEffect(() => {
@@ -54,11 +70,12 @@ export function AnalyticsWidget({ userId }: AnalyticsWidgetProps) {
   }
 
   // Check if any count might be truncated
-  const mightBeTruncated =
-    metrics.documentCount === MAX_VECTORS_PER_QUERY ||
-    metrics.searchCount === MAX_VECTORS_PER_QUERY ||
-    metrics.chatCount === MAX_VECTORS_PER_QUERY ||
-    metrics.chunkCount === MAX_VECTORS_PER_QUERY
+  const mightBeTruncated = analytics?.mightBeTruncated || {
+    documents: metrics.documentCount >= MAX_VECTORS_PER_QUERY,
+    chunks: metrics.chunkCount >= MAX_VECTORS_PER_QUERY,
+    searches: metrics.searchCount >= MAX_VECTORS_PER_QUERY,
+    chats: metrics.chatCount >= MAX_VECTORS_PER_QUERY,
+  }
 
   return (
     <DashboardCard title="Analytics" description="Key metrics and usage statistics" isLoading={isLoading}>
@@ -75,7 +92,80 @@ export function AnalyticsWidget({ userId }: AnalyticsWidgetProps) {
           </div>
         )}
 
-        {mightBeTruncated && (
+        {/* API Health Status */}
+        <div className="flex flex-wrap gap-2 mb-4">
+          <div
+            className={`px-3 py-1 rounded-full text-sm flex items-center gap-1 ${
+              pineconeApiHealthy
+                ? "bg-green-100 text-green-800"
+                : pineconeApiHealthy === false
+                  ? "bg-red-100 text-red-800"
+                  : "bg-gray-100 text-gray-800"
+            }`}
+          >
+            {pineconeApiHealthy === null ? (
+              <span className="animate-pulse">Checking Pinecone...</span>
+            ) : pineconeApiHealthy ? (
+              <>
+                <Check className="h-4 w-4" />
+                <span>Pinecone API</span>
+              </>
+            ) : (
+              <>
+                <X className="h-4 w-4" />
+                <span>Pinecone API</span>
+              </>
+            )}
+          </div>
+
+          <div
+            className={`px-3 py-1 rounded-full text-sm flex items-center gap-1 ${
+              openaiApiHealthy
+                ? "bg-green-100 text-green-800"
+                : openaiApiHealthy === false
+                  ? "bg-red-100 text-red-800"
+                  : "bg-gray-100 text-gray-800"
+            }`}
+          >
+            {openaiApiHealthy === null ? (
+              <span className="animate-pulse">Checking OpenAI...</span>
+            ) : openaiApiHealthy ? (
+              <>
+                <Check className="h-4 w-4" />
+                <span>OpenAI API</span>
+              </>
+            ) : (
+              <>
+                <X className="h-4 w-4" />
+                <span>OpenAI API</span>
+              </>
+            )}
+          </div>
+
+          {isCheckingHealth && (
+            <button
+              onClick={refreshAnalytics}
+              className="px-3 py-1 rounded-full text-sm bg-blue-100 text-blue-800 flex items-center gap-1"
+              disabled={isCheckingHealth}
+            >
+              <span className="animate-pulse">Checking APIs...</span>
+            </button>
+          )}
+
+          {!isCheckingHealth && (
+            <button
+              onClick={refreshAnalytics}
+              className="px-3 py-1 rounded-full text-sm bg-blue-100 text-blue-800 flex items-center gap-1"
+            >
+              <span>Refresh</span>
+            </button>
+          )}
+        </div>
+
+        {(mightBeTruncated.documents ||
+          mightBeTruncated.chunks ||
+          mightBeTruncated.searches ||
+          mightBeTruncated.chats) && (
           <div className="bg-yellow-50 border border-yellow-200 text-yellow-700 px-4 py-3 rounded-md mb-4">
             <div className="flex items-center">
               <Info className="h-5 w-5 mr-2" />
@@ -94,7 +184,7 @@ export function AnalyticsWidget({ userId }: AnalyticsWidgetProps) {
             <p className="mt-2 text-sm font-medium text-gray-500">Documents</p>
             <p className="text-2xl font-semibold text-gray-900">
               {metrics.documentCount}
-              {metrics.documentCount === MAX_VECTORS_PER_QUERY && "+"}
+              {mightBeTruncated.documents && "+"}
             </p>
           </div>
 
@@ -107,7 +197,7 @@ export function AnalyticsWidget({ userId }: AnalyticsWidgetProps) {
             <p className="mt-2 text-sm font-medium text-gray-500">Searches</p>
             <p className="text-2xl font-semibold text-gray-900">
               {metrics.searchCount}
-              {metrics.searchCount === MAX_VECTORS_PER_QUERY && "+"}
+              {mightBeTruncated.searches && "+"}
             </p>
           </div>
 
@@ -120,7 +210,7 @@ export function AnalyticsWidget({ userId }: AnalyticsWidgetProps) {
             <p className="mt-2 text-sm font-medium text-gray-500">Chats</p>
             <p className="text-2xl font-semibold text-gray-900">
               {metrics.chatCount}
-              {metrics.chatCount === MAX_VECTORS_PER_QUERY && "+"}
+              {mightBeTruncated.chats && "+"}
             </p>
           </div>
 
@@ -133,10 +223,29 @@ export function AnalyticsWidget({ userId }: AnalyticsWidgetProps) {
             <p className="mt-2 text-sm font-medium text-gray-500">Chunks</p>
             <p className="text-2xl font-semibold text-gray-900">
               {metrics.chunkCount}
-              {metrics.chunkCount === MAX_VECTORS_PER_QUERY && "+"}
+              {mightBeTruncated.chunks && "+"}
             </p>
           </div>
         </div>
+
+        {/* Debug Panel */}
+        {isDebugMode && (
+          <div className="mt-6">
+            <button
+              onClick={() => setShowDebug(!showDebug)}
+              className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700"
+            >
+              {showDebug ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              {showDebug ? "Hide Debug Info" : "Show Debug Info"}
+            </button>
+
+            {showDebug && analytics && (
+              <div className="mt-2 p-4 bg-gray-50 rounded-md overflow-auto max-h-96">
+                <pre className="text-xs">{JSON.stringify(analytics, null, 2)}</pre>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </DashboardCard>
   )

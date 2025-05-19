@@ -6,7 +6,6 @@
  */
 
 import type { Document, SearchResult, SearchOptions, Conversation, ChatMessage, AnalyticsData } from "@/types"
-import { isValidDocument } from "@/lib/utils/validators"
 
 /**
  * Base API call function with error handling
@@ -68,29 +67,27 @@ export async function uploadDocument(
     }),
   })
 
+  // Log the response for debugging
   console.log("Document creation response:", response)
 
   // Validate document response
   if (!response?.document) {
+    console.error("Invalid document response - missing document object:", response)
     throw new Error("Document upload failed: Invalid response format")
   }
 
   const { document } = response
 
-  if (!document?.id) {
-    console.error("Invalid document response - missing ID:", document)
-    throw new Error("Document upload failed: Missing document ID in response")
+  // Validate document ID
+  if (!document?.id || typeof document.id !== "string") {
+    console.error("Invalid document response - invalid ID:", document)
+    throw new Error("Document upload failed: Missing or invalid document ID")
   }
 
-  if (!document?.file_path) {
-    console.error("Invalid document response - missing file_path:", document)
-    throw new Error("Document upload failed: Missing file path in response")
-  }
-
-  // Additional validation using the utility function
-  if (!isValidDocument(document)) {
-    console.error("Invalid document response - failed validation:", document)
-    throw new Error("Document upload failed: Invalid document format")
+  // Validate file path
+  if (!document?.file_path || typeof document.file_path !== "string") {
+    console.error("Invalid document response - invalid file_path:", document)
+    throw new Error("Document upload failed: Missing or invalid file path")
   }
 
   // Then, upload the file
@@ -230,5 +227,36 @@ export async function sendMessage(conversationId: string, content: string, userI
  * Fetch analytics data
  */
 export async function fetchAnalytics(userId: string): Promise<AnalyticsData> {
-  return await apiCall<AnalyticsData>(`/api/analytics?userId=${encodeURIComponent(userId)}`)
+  const url = new URL(`/api/analytics`, window.location.origin)
+  url.searchParams.append("userId", userId)
+
+  // Add debug parameter if in debug mode
+  if (window.location.search.includes("debug=true")) {
+    url.searchParams.append("debug", "true")
+  }
+
+  return await apiCall<AnalyticsData>(url.toString())
+}
+
+/**
+ * Check API health
+ */
+export async function checkApiHealth(): Promise<{
+  pineconeApiHealthy: boolean
+  openaiApiHealthy: boolean
+}> {
+  try {
+    const response = await apiCall<{
+      pineconeApiHealthy: boolean
+      openaiApiHealthy: boolean
+    }>("/api/debug/check-health")
+
+    return response
+  } catch (error) {
+    console.error("Error checking API health:", error)
+    return {
+      pineconeApiHealthy: false,
+      openaiApiHealthy: false,
+    }
+  }
 }
