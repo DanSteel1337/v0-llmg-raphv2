@@ -66,26 +66,28 @@ export const GET = withErrorHandling(async (request: NextRequest) => {
       const chatCount = chatResult.matches?.length || 0
 
       // Get top documents (by chunk count)
-      const topDocuments =
-        documentResult.matches
-          ?.map((match) => ({
-            id: match.metadata?.document_id || "",
-            name: match.metadata?.name || "",
-            chunkCount: match.metadata?.chunk_count || 0,
-            createdAt: match.metadata?.created_at || "",
-          }))
-          .sort((a, b) => b.chunkCount - a.chunkCount)
-          .slice(0, 5) || []
+      const topDocuments = Array.isArray(documentResult.matches)
+        ? documentResult.matches
+            .map((match) => ({
+              id: match.metadata?.document_id || "",
+              name: match.metadata?.name || "",
+              chunkCount: match.metadata?.chunk_count || 0,
+              createdAt: match.metadata?.created_at || "",
+            }))
+            .sort((a, b) => b.chunkCount - a.chunkCount)
+            .slice(0, 5)
+        : []
 
       // Get top searches
-      const topSearches =
-        searchResult.matches
-          ?.map((match) => ({
-            query: match.metadata?.query || "",
-            count: 1, // We count each search as 1 since we don't have aggregation
-            timestamp: match.metadata?.created_at || "",
-          }))
-          .slice(0, 5) || []
+      const topSearches = Array.isArray(searchResult.matches)
+        ? searchResult.matches
+            .map((match) => ({
+              query: match.metadata?.query || "",
+              count: 1, // We count each search as 1 since we don't have aggregation
+              timestamp: match.metadata?.created_at || "",
+            }))
+            .slice(0, 5)
+        : []
 
       const analyticsData = {
         documentCount,

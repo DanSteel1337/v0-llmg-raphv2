@@ -39,6 +39,9 @@ export function ChatWidget({ userId }: ChatWidgetProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const { addToast } = useToast()
 
+  // Ensure conversations is always an array
+  const safeConversations = Array.isArray(conversations) ? conversations : []
+
   // Handle API errors
   useEffect(() => {
     if (conversationsError) {
@@ -124,9 +127,9 @@ export function ChatWidget({ userId }: ChatWidgetProps) {
               New Conversation
             </button>
 
-            {conversations && conversations.length > 0 ? (
+            {safeConversations.length > 0 ? (
               <ul className="divide-y divide-gray-200">
-                {conversations.slice(0, 3).map((conversation) => (
+                {safeConversations.slice(0, 3).map((conversation) => (
                   <li key={conversation.id}>
                     <button
                       onClick={() => handleOpenChat(conversation)}
@@ -160,7 +163,7 @@ export function ChatWidget({ userId }: ChatWidgetProps) {
                 ← Back to conversations
               </button>
               <span className="text-sm font-medium">
-                {(conversations && conversations.find((c) => c.id === activeConversationId)?.title) || "Conversation"}
+                {safeConversations.find((c) => c.id === activeConversationId)?.title || "Conversation"}
               </span>
             </div>
 

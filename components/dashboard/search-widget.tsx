@@ -84,6 +84,12 @@ export function SearchWidget({ userId, recentSearches = [] }: SearchWidgetProps)
     }
   }
 
+  // Ensure results is always an array
+  const safeResults = Array.isArray(results) ? results : []
+
+  // Ensure recentSearches is always an array
+  const safeRecentSearches = Array.isArray(recentSearches) ? recentSearches : []
+
   return (
     <DashboardCard title="Search" description="Search across your documents" isLoading={false}>
       <div className="space-y-4">
@@ -168,20 +174,20 @@ export function SearchWidget({ userId, recentSearches = [] }: SearchWidgetProps)
         )}
 
         {/* Search results */}
-        {!isLoading && debouncedQuery && results && results.length > 0 && (
+        {!isLoading && debouncedQuery && safeResults.length > 0 && (
           <div className="space-y-4">
             <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wider">
-              {results.length} {results.length === 1 ? "Result" : "Results"}
+              {safeResults.length} {safeResults.length === 1 ? "Result" : "Results"}
             </h4>
             <ul className="space-y-3">
-              {results.map((result) => (
+              {safeResults.map((result) => (
                 <li key={result.id} className="bg-white border border-gray-200 rounded-md p-3 hover:bg-gray-50">
                   <h5 className="text-sm font-medium text-gray-900 mb-1 truncate">{result.title}</h5>
                   <p className="text-xs text-gray-500 mb-2">
                     {result.documentName} • {result.date} • {Math.round(result.relevance * 100)}% match
                   </p>
                   <div className="text-sm text-gray-700 line-clamp-2">{result.content}</div>
-                  {result.highlights && result.highlights.length > 0 && (
+                  {result.highlights && Array.isArray(result.highlights) && result.highlights.length > 0 && (
                     <div className="mt-2 text-xs bg-yellow-50 p-2 rounded border border-yellow-100">
                       <p className="font-medium text-yellow-800 mb-1">Highlights:</p>
                       <p className="text-gray-700">{result.highlights[0]}</p>
@@ -194,7 +200,7 @@ export function SearchWidget({ userId, recentSearches = [] }: SearchWidgetProps)
         )}
 
         {/* No results state */}
-        {!isLoading && debouncedQuery && (!results || results.length === 0) && !error && !searchError && (
+        {!isLoading && debouncedQuery && safeResults.length === 0 && !error && !searchError && (
           <div className="py-8 text-center">
             <p className="text-sm text-gray-500">No results found for "{debouncedQuery}"</p>
             <p className="text-xs text-gray-400 mt-1">Try a different search term or search type</p>
@@ -202,11 +208,11 @@ export function SearchWidget({ userId, recentSearches = [] }: SearchWidgetProps)
         )}
 
         {/* Recent searches */}
-        {!debouncedQuery && recentSearches && recentSearches.length > 0 && (
+        {!debouncedQuery && safeRecentSearches.length > 0 && (
           <div>
             <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">Recent Searches</h4>
             <ul className="space-y-1">
-              {recentSearches.slice(0, 3).map((search, index) => (
+              {safeRecentSearches.slice(0, 3).map((search, index) => (
                 <li key={index}>
                   <button
                     onClick={() => handleRecentSearch(search)}

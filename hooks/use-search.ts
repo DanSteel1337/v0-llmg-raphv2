@@ -33,10 +33,17 @@ export function useSearch(userId: string) {
   // Save search to local storage
   const saveSearchToHistory = (query: string) => {
     if (typeof window !== "undefined") {
-      const searches = JSON.parse(localStorage.getItem("recentSearches") || "[]")
-      if (!searches.includes(query)) {
-        searches.unshift(query)
-        if (searches.length > 5) searches.pop()
+      try {
+        const searches = JSON.parse(localStorage.getItem("recentSearches") || "[]")
+        if (Array.isArray(searches) && !searches.includes(query)) {
+          searches.unshift(query)
+          if (searches.length > 5) searches.pop()
+          localStorage.setItem("recentSearches", JSON.stringify(searches))
+        }
+      } catch (error) {
+        console.error("Error saving search to history:", error)
+        // Fallback: create a new array if parsing fails
+        const searches = [query]
         localStorage.setItem("recentSearches", JSON.stringify(searches))
       }
     }
@@ -48,7 +55,7 @@ export function useSearch(userId: string) {
     try {
       const results = await executeSearch(query)
       saveSearchToHistory(query)
-      return results
+      return results || []
     } catch (error) {
       console.error("Search error:", error)
       throw error
@@ -56,7 +63,7 @@ export function useSearch(userId: string) {
   }
 
   return {
-    results: results || [],
+    results: Array.isArray(results) ? results : [],
     isLoading,
     error,
     search,

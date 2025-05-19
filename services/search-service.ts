@@ -298,6 +298,11 @@ async function keywordSearch(query: string, userId: string, options: SearchOptio
  * Formats search results from Pinecone matches
  */
 function formatSearchResults(matches: any[]): SearchResult[] {
+  if (!Array.isArray(matches)) {
+    console.error("formatSearchResults received non-array input:", matches)
+    return []
+  }
+
   return matches.map((match) => {
     // Extract content and ensure it's a string
     const content = (match.metadata?.content as string) || ""
@@ -309,7 +314,7 @@ function formatSearchResults(matches: any[]): SearchResult[] {
     const highlights = generateHighlights(content, match.metadata?.document_name as string)
 
     return {
-      id: match.id,
+      id: match.id || `result_${Math.random().toString(36).substring(2, 9)}`,
       title: title,
       content: content,
       documentName: (match.metadata?.document_name as string) || "Unknown Document",
