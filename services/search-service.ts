@@ -9,13 +9,11 @@
  *
  * Dependencies:
  * - @/lib/pinecone-client.ts for vector storage and retrieval
- * - @/lib/embedding-service.ts for embeddings
  * - uuid for ID generation
  */
 
 import { v4 as uuidv4 } from "uuid"
 import { getPineconeIndex } from "@/lib/pinecone-client"
-import { generateEmbedding } from "@/lib/embedding-service"
 import type { SearchOptions, SearchResult } from "@/types"
 
 // Constants
@@ -79,8 +77,20 @@ export async function logSearchQuery(
  */
 async function semanticSearch(query: string, userId: string, options: SearchOptions): Promise<SearchResult[]> {
   try {
-    // Generate embedding for the query
-    const embedding = await generateEmbedding(query)
+    // Generate embedding for the query using our API endpoint
+    const embeddingResponse = await fetch("/api/embeddings", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ text: query }),
+    })
+
+    if (!embeddingResponse.ok) {
+      throw new Error("Failed to generate embedding")
+    }
+
+    const { embedding } = await embeddingResponse.json()
 
     // Build filter based on document types if provided
     const filter: any = {

@@ -9,16 +9,11 @@
  *
  * Dependencies:
  * - @/lib/pinecone-client.ts for vector storage and retrieval
- * - @/lib/embedding-service.ts for embeddings
- * - ai for text generation
  * - uuid for ID generation
  */
 
 import { v4 as uuidv4 } from "uuid"
 import { getPineconeIndex } from "@/lib/pinecone-client"
-import { generateEmbedding } from "@/lib/embedding-service"
-import { openai } from "@ai-sdk/openai"
-import { generateText } from "ai"
 import type { ChatMessage, Conversation, CreateMessageOptions } from "@/types"
 
 // Constants
@@ -262,7 +257,19 @@ export async function createMessage({
   }
 
   // Generate embedding for the message content
-  const embedding = await generateEmbedding(content)
+  const embeddingResponse = await fetch("/api/embeddings", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ text: content }),
+  })
+
+  if (!embeddingResponse.ok) {
+    throw new Error("Failed to generate embedding")
+  }
+
+  const { embedding } = await embeddingResponse.json()
 
   // Store message with embedding
   await pineconeIndex.upsert({
@@ -325,13 +332,23 @@ export async function generateResponse(
     // 3. Create system message with context
     const systemMessage = `${SYSTEM_PROMPT}\n\nContext:\n${context.map((item) => `${item.content} [Document: ${item.documentName}]`).join("\n\n")}`
 
-    // 4. Generate response
-    const { text: responseContent } = await generateText({
-      model: openai("gpt-4o"),
-      system: systemMessage,
-      prompt: userMessage,
-      messages: recentHistory,
+    // 4. Generate response using our API endpoint
+    const response = await fetch("/api/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        messages: recentHistory,
+        system: systemMessage,
+      }),
     })
+
+    if (!response.ok) {
+      throw new Error("Failed to generate response")
+    }
+
+    const { text: responseContent } = await response.json()
 
     // Extract unique document names from context
     const sources: string[] = []
@@ -368,8 +385,20 @@ export async function generateResponse(
  */
 async function retrieveRelevantContext(query: string, userId: string) {
   try {
-    // Generate embedding for the query
-    const embedding = await generateEmbedding(query)
+    // Generate embedding for the query using our API endpoint
+    const embeddingResponse = await fetch("/api/embeddings", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ text: query }),
+    })
+
+    if (!embeddingResponse.ok) {
+      throw new Error("Failed to generate embedding")
+    }
+
+    const { embedding } = await embeddingResponse.json()
 
     // Query Pinecone for relevant chunks
     const pineconeIndex = await getPineconeIndex()

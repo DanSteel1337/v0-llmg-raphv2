@@ -10,14 +10,12 @@
  * Dependencies:
  * - @/lib/pinecone-client.ts for vector storage
  * - @/lib/supabase-client.ts for file storage
- * - @/lib/embedding-service.ts for embeddings
  * - uuid for ID generation
  */
 
 import { v4 as uuidv4 } from "uuid"
 import { getPineconeIndex } from "@/lib/pinecone-client"
 import { getSupabaseBrowserClient } from "@/lib/supabase-client"
-import { generateEmbedding } from "@/lib/embedding-service"
 import type { Document, DocumentChunk, ProcessDocumentOptions } from "@/types"
 
 // Constants
@@ -550,31 +548,38 @@ async function embedAndStoreChunks(chunks: DocumentChunk[]): Promise<void> {
   for (let i = 0; i < chunks.length; i += EMBEDDING_BATCH_SIZE) {
     const batch = chunks.slice(i, i + EMBEDDING_BATCH_SIZE)
 
-    // Generate embeddings for this batch
-    const embeddingPromises = batch.map(async (chunk) => {
-      try {
-        const embedding = await generateEmbedding(chunk.content)
+    // Extract texts for batch embedding
+    const texts = batch.map((chunk) => chunk.content)
 
-        return {
-          id: chunk.id,
-          values: embedding,
-          metadata: {
-            ...chunk.metadata,
-            content: chunk.content,
-          },
-        }
-      } catch (error) {
-        console.error(`Error generating embedding for chunk ${chunk.id}:`, error)
-        throw error
-      }
+    // Generate embeddings for this batch using our API endpoint
+    const embeddingResponse = await fetch("/api/embeddings", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ texts }),
     })
 
-    const embeddings = await Promise.all(embeddingPromises)
+    if (!embeddingResponse.ok) {
+      throw new Error("Failed to generate embeddings")
+    }
+
+    const { embeddings } = await embeddingResponse.json()
+
+    // Prepare vectors for Pinecone
+    const vectors = batch.map((chunk, idx) => ({
+      id: chunk.id,
+      values: embeddings[idx],
+      metadata: {
+        ...chunk.metadata,
+        content: chunk.content,
+      },
+    }))
 
     // Store embeddings in Pinecone
     await pineconeIndex.upsert({
       upsertRequest: {
-        vectors: embeddings,
+        vectors,
         namespace: "",
       },
     })
