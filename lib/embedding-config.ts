@@ -5,8 +5,23 @@
  * based on the configured Pinecone index.
  */
 
-// Get embedding configuration based on environment variables with strict validation
+// Check if we're running on the client side
+const isClient = typeof window !== "undefined"
+
+// Get embedding configuration based on environment variables
 export const getEmbeddingConfig = () => {
+  // If we're on the client side, throw a clear error or return client-safe defaults
+  if (isClient) {
+    console.warn("[EmbeddingConfig] Attempted to access server-only configuration on the client side")
+    return {
+      model: "text-embedding-3-large",
+      dimensions: 3072,
+      indexName: "pinecone-index", // This is just a placeholder
+      host: "https://api.example.com", // This is just a placeholder
+      isClientSide: true,
+    }
+  }
+
   const model = process.env.EMBEDDING_MODEL
   const indexName = process.env.PINECONE_INDEX_NAME
   const host = process.env.PINECONE_HOST
@@ -60,17 +75,36 @@ export const getEmbeddingConfig = () => {
     indexName,
     host,
     dimensions,
+    isClientSide: false,
   }
 }
 
-// Get the configuration (will throw if invalid)
-const config = getEmbeddingConfig()
+// Create a safe version of the config that won't throw on the client side
+let config: ReturnType<typeof getEmbeddingConfig>
+try {
+  config = getEmbeddingConfig()
+} catch (error) {
+  if (isClient) {
+    console.warn("[EmbeddingConfig] Using client-side fallback configuration")
+    config = {
+      model: "text-embedding-3-large",
+      dimensions: 3072,
+      indexName: "pinecone-index", // This is just a placeholder
+      host: "https://api.example.com", // This is just a placeholder
+      isClientSide: true,
+    }
+  } else {
+    // Re-throw the error on the server side
+    throw error
+  }
+}
 
 // Export the configuration values
 export const EMBEDDING_MODEL = config.model
 export const VECTOR_DIMENSION = config.dimensions
 export const INDEX_NAME = config.indexName
 export const PINECONE_HOST = config.host
+export const IS_CLIENT_SIDE = config.isClientSide
 
 // Validate vector dimensions against the expected dimension
 export function validateVectorDimension(vector: number[]): void {
