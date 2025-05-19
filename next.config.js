@@ -39,14 +39,21 @@ const nextConfig = {
 
     // Explicitly mark these packages as external for server-side
     if (isServer) {
-      config.externals = [...(config.externals || []), "fs", "path", "stream", "node:stream"]
+      config.externals = [...(config.externals || []), "fs", "path", "stream", "node:stream", "@supabase/supabase-js"]
     }
 
     return config
   },
   // Explicitly tell Next.js which packages are server-only
   experimental: {
-    serverComponentsExternalPackages: ["@pinecone-database/pinecone", "fs", "path", "stream", "node:stream"],
+    serverComponentsExternalPackages: [
+      "@pinecone-database/pinecone",
+      "fs",
+      "path",
+      "stream",
+      "node:stream",
+      "@supabase/supabase-js",
+    ],
   },
 }
 
