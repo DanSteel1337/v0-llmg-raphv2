@@ -16,17 +16,25 @@ import type { User } from "@supabase/supabase-js"
 
 /**
  * Get the current authenticated user
+ * Returns null if no user is authenticated (no error thrown)
  */
 export async function getCurrentUser(): Promise<User | null> {
-  const supabase = getSupabaseBrowserClient()
-  const { data, error } = await supabase.auth.getUser()
+  try {
+    const supabase = getSupabaseBrowserClient()
+    const { data, error } = await supabase.auth.getUser()
 
-  if (error) {
-    console.error("Error getting user:", error)
+    if (error) {
+      // Log the error but don't throw it - just return null for no user
+      console.log("Auth state check:", error.message)
+      return null
+    }
+
+    return data.user
+  } catch (err) {
+    // Log any unexpected errors but return null instead of throwing
+    console.error("Unexpected error checking auth state:", err)
     return null
   }
-
-  return data.user
 }
 
 /**

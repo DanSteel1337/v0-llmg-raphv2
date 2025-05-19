@@ -10,8 +10,9 @@
 
 "use client"
 
-import { useState } from "react"
+import { useState, useCallback } from "react"
 import { useApi } from "@/hooks/use-api"
+import { performSearch } from "@/services/client-api-service"
 import type { SearchResult, SearchOptions } from "@/types"
 
 export function useSearch(userId: string) {
@@ -19,48 +20,15 @@ export function useSearch(userId: string) {
     type: "semantic",
   })
 
-  const {
-    data: results,
-    isLoading,
-    error,
-    execute: performSearch,
-  } = useApi<SearchResult[], [string]>(async (query) => {
-    // Build query parameters
-    const params = new URLSearchParams({
-      userId,
-      q: query,
-      type: searchOptions.type,
-    })
+  // Wrap the search function with useCallback
+  const searchCallback = useCallback(
+    (query: string) => {
+      return performSearch(userId, query, searchOptions)
+    },
+    [userId, searchOptions],
+  )
 
-    // Add document types if provided
-    if (searchOptions.documentTypes && searchOptions.documentTypes.length > 0) {
-      searchOptions.documentTypes.forEach((type) => {
-        params.append("documentType", type)
-      })
-    }
-
-    // Add sort option if provided
-    if (searchOptions.sortBy) {
-      params.append("sortBy", searchOptions.sortBy)
-    }
-
-    // Add date range if provided
-    if (searchOptions.dateRange?.from) {
-      params.append("from", searchOptions.dateRange.from.toISOString())
-    }
-    if (searchOptions.dateRange?.to) {
-      params.append("to", searchOptions.dateRange.to.toISOString())
-    }
-
-    const response = await fetch(`/api/search?${params.toString()}`)
-
-    if (!response.ok) {
-      throw new Error("Failed to perform search")
-    }
-
-    const { data } = await response.json()
-    return data.results || []
-  })
+  const { data: results, isLoading, error, execute: executeSearch } = useApi<SearchResult[], [string]>(searchCallback)
 
   // Save search to local storage
   const saveSearchToHistory = (query: string) => {
@@ -78,7 +46,7 @@ export function useSearch(userId: string) {
     if (!query.trim()) return []
 
     try {
-      const results = await performSearch(query)
+      const results = await executeSearch(query)
       saveSearchToHistory(query)
       return results
     } catch (error) {

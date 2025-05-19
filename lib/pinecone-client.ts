@@ -5,12 +5,22 @@
  * This module ensures that only one connection to Pinecone is maintained
  * throughout the application lifecycle.
  *
+ * IMPORTANT: This module should ONLY be imported in server-side code (API routes).
+ * It uses Node.js specific modules that are not available in the browser.
+ *
  * Dependencies:
  * - @pinecone-database/pinecone v0.5.2 for vector database operations
  * - Environment variables: PINECONE_API_KEY, PINECONE_ENVIRONMENT, PINECONE_INDEX_NAME
  */
 
 import { PineconeClient } from "@pinecone-database/pinecone"
+
+// Prevent client-side usage
+if (typeof window !== "undefined") {
+  throw new Error(
+    "Pinecone client cannot be used in browser environment. Import this module only in API routes or server components.",
+  )
+}
 
 // Initialize the client
 let pineconeClient: PineconeClient | null = null

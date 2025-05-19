@@ -18,7 +18,7 @@ import { useState, useRef } from "react"
 import { FileText, Upload, AlertCircle, CheckCircle } from "lucide-react"
 import { DashboardCard } from "@/components/ui/dashboard-card"
 import { useDocuments } from "@/hooks/use-documents"
-import { formatFileSize, formatDate } from "@/utils"
+import { formatFileSize, formatDate } from "@/utils/formatting"
 import { useToast } from "@/components/toast"
 import type { Document } from "@/types"
 

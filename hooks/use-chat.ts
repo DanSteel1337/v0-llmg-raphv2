@@ -10,8 +10,14 @@
 
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { useApi } from "@/hooks/use-api"
+import {
+  fetchConversations,
+  createConversation as apiCreateConversation,
+  fetchMessages,
+  sendMessage as apiSendMessage,
+} from "@/services/client-api-service"
 import type { ChatMessage, Conversation } from "@/types"
 
 export function useChat(userId: string, conversationId?: string) {
@@ -19,63 +25,39 @@ export function useChat(userId: string, conversationId?: string) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isTyping, setIsTyping] = useState(false)
 
+  // Wrap the fetchMessages call with useCallback
+  const fetchMessagesCallback = useCallback(() => {
+    if (!activeConversationId) return Promise.resolve([])
+    return fetchMessages(activeConversationId)
+  }, [activeConversationId])
+
+  // Wrap the fetchConversations call with useCallback
+  const fetchConversationsCallback = useCallback(() => {
+    return fetchConversations(userId)
+  }, [userId])
+
   // Fetch messages for the active conversation
   const {
     data: fetchedMessages,
     isLoading: isLoadingMessages,
     error: messagesError,
-    execute: fetchMessages,
-  } = useApi<ChatMessage[], []>(async () => {
-    if (!activeConversationId) return []
-
-    const response = await fetch(`/api/chat/messages?conversationId=${activeConversationId}`)
-
-    if (!response.ok) {
-      throw new Error("Failed to fetch messages")
-    }
-
-    const { data } = await response.json()
-    return data.messages || []
-  })
+    execute: loadMessages,
+  } = useApi<ChatMessage[], []>(fetchMessagesCallback)
 
   // Fetch conversations
   const {
     data: conversations,
     isLoading: isLoadingConversations,
     error: conversationsError,
-    execute: fetchConversations,
-  } = useApi<Conversation[], []>(async () => {
-    const response = await fetch(`/api/conversations?userId=${userId}`)
-
-    if (!response.ok) {
-      throw new Error("Failed to fetch conversations")
-    }
-
-    const { data } = await response.json()
-    return data.conversations || []
-  })
+    execute: loadConversations,
+  } = useApi<Conversation[], []>(fetchConversationsCallback)
 
   // Create a new conversation
   const createConversation = async (title: string) => {
-    const response = await fetch("/api/conversations", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        userId,
-        title,
-      }),
-    })
-
-    if (!response.ok) {
-      throw new Error("Failed to create conversation")
-    }
-
-    const { data } = await response.json()
-    setActiveConversationId(data.conversation.id)
-    await fetchConversations()
-    return data.conversation
+    const conversation = await apiCreateConversation(userId, title)
+    setActiveConversationId(conversation.id)
+    await loadConversations()
+    return conversation
   }
 
   // Send a message
@@ -87,23 +69,8 @@ export function useChat(userId: string, conversationId?: string) {
     setIsTyping(true)
 
     try {
-      const response = await fetch("/api/chat/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          conversationId: activeConversationId,
-          content,
-          userId,
-        }),
-      })
-
-      if (!response.ok) {
-        throw new Error("Failed to send message")
-      }
-
-      await fetchMessages()
+      await apiSendMessage(activeConversationId, content, userId)
+      await loadMessages()
       return true
     } catch (error) {
       console.error("Error sending message:", error)
@@ -116,11 +83,11 @@ export function useChat(userId: string, conversationId?: string) {
   // Load messages when the active conversation changes
   useEffect(() => {
     if (activeConversationId) {
-      fetchMessages()
+      loadMessages()
     } else {
       setMessages([])
     }
-  }, [activeConversationId, fetchMessages])
+  }, [activeConversationId, loadMessages])
 
   // Update messages when fetched messages change
   useEffect(() => {
@@ -131,8 +98,8 @@ export function useChat(userId: string, conversationId?: string) {
 
   // Load conversations on mount
   useEffect(() => {
-    fetchConversations()
-  }, [fetchConversations])
+    loadConversations()
+  }, [loadConversations])
 
   return {
     messages,
@@ -146,7 +113,7 @@ export function useChat(userId: string, conversationId?: string) {
     setActiveConversationId,
     sendMessage,
     createConversation,
-    refreshMessages: fetchMessages,
-    refreshConversations: fetchConversations,
+    refreshMessages: loadMessages,
+    refreshConversations: loadConversations,
   }
 }

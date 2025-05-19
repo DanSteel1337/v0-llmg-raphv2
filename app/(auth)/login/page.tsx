@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { useAuth } from "@/hooks/use-auth"
 
@@ -12,7 +12,14 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const router = useRouter()
-  const { signInWithEmail } = useAuth()
+  const { signInWithEmail, user, isLoading: authLoading } = useAuth()
+
+  // If user is already logged in, redirect to dashboard
+  useEffect(() => {
+    if (user && !authLoading) {
+      router.push("/dashboard")
+    }
+  }, [user, authLoading, router])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -34,6 +41,15 @@ export default function LoginPage() {
       console.error(err)
       setIsLoading(false)
     }
+  }
+
+  // Don't show the login form while checking auth state
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+      </div>
+    )
   }
 
   return (

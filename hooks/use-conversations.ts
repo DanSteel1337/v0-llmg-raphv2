@@ -10,50 +10,32 @@
 
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useCallback } from "react"
 import { useApi } from "@/hooks/use-api"
+import { fetchConversations, createConversation as apiCreateConversation } from "@/services/client-api-service"
 import type { Conversation } from "@/types"
 
 export function useConversations(userId: string) {
+  // Wrap the fetchConversations call with useCallback
+  const fetchConversationsCallback = useCallback(() => {
+    return fetchConversations(userId)
+  }, [userId])
+
   const {
     data: conversations,
     isLoading,
     error,
-    execute: fetchConversations,
-  } = useApi<Conversation[], []>(async () => {
-    const response = await fetch(`/api/conversations?userId=${userId}`)
-
-    if (!response.ok) {
-      throw new Error("Failed to fetch conversations")
-    }
-
-    const { data } = await response.json()
-    return data.conversations || []
-  })
+    execute: loadConversations,
+  } = useApi<Conversation[], []>(fetchConversationsCallback)
 
   useEffect(() => {
-    fetchConversations()
-  }, [fetchConversations])
+    loadConversations()
+  }, [loadConversations])
 
   const createConversation = async (title: string) => {
-    const response = await fetch("/api/conversations", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        userId,
-        title,
-      }),
-    })
-
-    if (!response.ok) {
-      throw new Error("Failed to create conversation")
-    }
-
-    const { data } = await response.json()
-    await fetchConversations()
-    return data.conversation
+    const conversation = await apiCreateConversation(userId, title)
+    await loadConversations()
+    return conversation
   }
 
   const deleteConversation = async (id: string) => {
@@ -65,7 +47,7 @@ export function useConversations(userId: string) {
       throw new Error("Failed to delete conversation")
     }
 
-    await fetchConversations()
+    await loadConversations()
   }
 
   return {
@@ -74,6 +56,6 @@ export function useConversations(userId: string) {
     error,
     createConversation,
     deleteConversation,
-    refreshConversations: fetchConversations,
+    refreshConversations: loadConversations,
   }
 }

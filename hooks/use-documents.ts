@@ -11,92 +11,48 @@
 
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useCallback } from "react"
 import { useApi } from "@/hooks/use-api"
+import { fetchDocuments, uploadDocument, deleteDocument } from "@/services/client-api-service"
 import type { Document } from "@/types"
 
 export function useDocuments(userId: string) {
+  // Wrap the fetchDocuments call with useCallback to create a stable reference
+  const fetchDocumentsCallback = useCallback(() => {
+    return fetchDocuments(userId)
+  }, [userId])
+
   const {
     data: documents,
     isLoading,
     error,
-    execute: fetchDocuments,
-  } = useApi<Document[], []>(async () => {
-    const response = await fetch(`/api/documents?userId=${userId}`)
-
-    if (!response.ok) {
-      throw new Error("Failed to fetch documents")
-    }
-
-    const { data } = await response.json()
-    return data.documents || []
-  })
+    execute: fetchDocumentsData,
+  } = useApi<Document[], []>(fetchDocumentsCallback)
 
   useEffect(() => {
-    fetchDocuments()
-  }, [fetchDocuments])
+    fetchDocumentsData()
+  }, [fetchDocumentsData])
 
-  const uploadDocument = async (file: File) => {
+  const handleUploadDocument = async (file: File) => {
     try {
-      // 1. Upload file to storage
-      const formData = new FormData()
-      formData.append("file", file)
-      formData.append("userId", userId)
+      const document = await uploadDocument(userId, file)
 
-      const uploadResponse = await fetch("/api/documents/upload", {
-        method: "POST",
-        body: formData,
-      })
+      // Refresh documents list
+      await fetchDocumentsData()
 
-      if (!uploadResponse.ok) {
-        throw new Error("Failed to upload file")
-      }
-
-      const { data: uploadData } = await uploadResponse.json()
-
-      // 2. Create document record
-      const createResponse = await fetch("/api/documents", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          userId,
-          name: file.name,
-          fileType: file.type,
-          fileSize: file.size,
-          filePath: uploadData.path,
-        }),
-      })
-
-      if (!createResponse.ok) {
-        throw new Error("Failed to create document record")
-      }
-
-      const { data: documentData } = await createResponse.json()
-
-      // 3. Refresh documents list
-      await fetchDocuments()
-
-      return documentData.document
+      return document
     } catch (error) {
       console.error("Error uploading document:", error)
       throw error
     }
   }
 
-  const deleteDocument = async (id: string) => {
+  const handleDeleteDocument = async (id: string) => {
     try {
-      const response = await fetch(`/api/documents/${id}`, {
-        method: "DELETE",
-      })
-
-      if (!response.ok) {
-        throw new Error("Failed to delete document")
-      }
+      await deleteDocument(id)
 
       // Refresh documents list
-      await fetchDocuments()
+      await fetchDocumentsData()
     } catch (error) {
       console.error("Error deleting document:", error)
       throw error
@@ -107,8 +63,8 @@ export function useDocuments(userId: string) {
     documents: documents || [],
     isLoading,
     error,
-    uploadDocument,
-    deleteDocument,
-    refreshDocuments: fetchDocuments,
+    uploadDocument: handleUploadDocument,
+    deleteDocument: handleDeleteDocument,
+    refreshDocuments: fetchDocumentsData,
   }
 }

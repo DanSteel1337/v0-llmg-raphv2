@@ -10,7 +10,7 @@
 
 "use client"
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useRef } from "react"
 
 type ApiState<T> = {
   data: T | null
@@ -27,11 +27,19 @@ export function useApi<T, P extends any[]>(apiFunction: ApiFunction<T, P>) {
     error: null,
   })
 
+  // Use a ref to keep track of the latest apiFunction
+  const apiFunctionRef = useRef(apiFunction)
+
+  // Update the ref whenever apiFunction changes
+  apiFunctionRef.current = apiFunction
+
+  // Memoize execute with an empty dependency array since we're using the ref
   const execute = useCallback(
     async (...args: P) => {
       setState((prev) => ({ ...prev, isLoading: true, error: null }))
       try {
-        const data = await apiFunction(...args)
+        // Use the ref's current value to ensure we're using the latest function
+        const data = await apiFunctionRef.current(...args)
         setState({ data, isLoading: false, error: null })
         return data
       } catch (error) {
@@ -40,7 +48,7 @@ export function useApi<T, P extends any[]>(apiFunction: ApiFunction<T, P>) {
         throw errorObject
       }
     },
-    [apiFunction],
+    [], // Empty dependency array since we're using the ref
   )
 
   return {

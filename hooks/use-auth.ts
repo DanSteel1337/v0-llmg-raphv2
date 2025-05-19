@@ -30,9 +30,11 @@ export function useAuth() {
   useEffect(() => {
     async function loadUser() {
       try {
+        setIsLoading(true)
         const currentUser = await getCurrentUser()
         setUser(currentUser)
       } catch (err) {
+        console.error("Error in loadUser:", err)
         setError(err instanceof Error ? err.message : "Failed to load user")
       } finally {
         setIsLoading(false)

@@ -10,35 +10,27 @@
 
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useCallback } from "react"
 import { useApi } from "@/hooks/use-api"
+import { fetchAnalytics } from "@/services/client-api-service"
 import type { AnalyticsData } from "@/types"
 
 export function useAnalytics(userId: string) {
-  const {
-    data,
-    isLoading,
-    error,
-    execute: fetchAnalytics,
-  } = useApi<AnalyticsData, []>(async () => {
-    const response = await fetch(`/api/analytics?userId=${userId}`)
+  // Wrap the fetchAnalytics call with useCallback
+  const fetchAnalyticsCallback = useCallback(() => {
+    return fetchAnalytics(userId)
+  }, [userId])
 
-    if (!response.ok) {
-      throw new Error("Failed to fetch analytics")
-    }
-
-    const { data } = await response.json()
-    return data
-  })
+  const { data, isLoading, error, execute: loadAnalytics } = useApi<AnalyticsData, []>(fetchAnalyticsCallback)
 
   useEffect(() => {
-    fetchAnalytics()
-  }, [fetchAnalytics])
+    loadAnalytics()
+  }, [loadAnalytics])
 
   return {
     analytics: data,
     isLoading,
     error,
-    refreshAnalytics: fetchAnalytics,
+    refreshAnalytics: loadAnalytics,
   }
 }

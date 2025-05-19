@@ -15,7 +15,7 @@ import type React from "react"
 
 import { MessageSquare, Plus, Send } from "lucide-react"
 import { DashboardCard } from "@/components/ui/dashboard-card"
-import { formatDate } from "@/utils"
+import { formatDate } from "@/utils/formatting"
 import { useToast } from "@/components/toast"
 import { useChat } from "@/hooks/use-chat"
 import type { Conversation } from "@/types"
