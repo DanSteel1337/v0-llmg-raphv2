@@ -12,63 +12,82 @@ import type { Document, SearchResult, SearchOptions, Conversation, ChatMessage, 
 
 // Document API methods
 export async function fetchDocuments(userId: string): Promise<Document[]> {
-  const response = await fetch(`/api/documents?userId=${userId}`)
+  try {
+    const response = await fetch(`/api/documents?userId=${userId}`)
 
-  if (!response.ok) {
-    throw new Error("Failed to fetch documents")
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(errorData.error || `Failed to fetch documents: ${response.status}`)
+    }
+
+    const { data } = await response.json()
+    return data.documents || []
+  } catch (error) {
+    console.error("Error fetching documents:", error)
+    throw error
   }
-
-  const { data } = await response.json()
-  return data.documents || []
 }
 
 export async function uploadDocument(userId: string, file: File): Promise<Document> {
-  // 1. Upload file to storage
-  const formData = new FormData()
-  formData.append("file", file)
-  formData.append("userId", userId)
+  try {
+    // 1. Upload file to storage
+    const formData = new FormData()
+    formData.append("file", file)
+    formData.append("userId", userId)
 
-  const uploadResponse = await fetch("/api/documents/upload", {
-    method: "POST",
-    body: formData,
-  })
+    const uploadResponse = await fetch("/api/documents/upload", {
+      method: "POST",
+      body: formData,
+    })
 
-  if (!uploadResponse.ok) {
-    throw new Error("Failed to upload file")
+    if (!uploadResponse.ok) {
+      const errorData = await uploadResponse.json()
+      throw new Error(errorData.error || `Failed to upload file: ${uploadResponse.status}`)
+    }
+
+    const { data: uploadData } = await uploadResponse.json()
+
+    // 2. Create document record
+    const createResponse = await fetch("/api/documents", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        userId,
+        name: file.name,
+        fileType: file.type,
+        fileSize: file.size,
+        filePath: uploadData.path,
+      }),
+    })
+
+    if (!createResponse.ok) {
+      const errorData = await createResponse.json()
+      throw new Error(errorData.error || `Failed to create document record: ${createResponse.status}`)
+    }
+
+    const { data: documentData } = await createResponse.json()
+    return documentData.document
+  } catch (error) {
+    console.error("Error uploading document:", error)
+    throw error
   }
-
-  const { data: uploadData } = await uploadResponse.json()
-
-  // 2. Create document record
-  const createResponse = await fetch("/api/documents", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      userId,
-      name: file.name,
-      fileType: file.type,
-      fileSize: file.size,
-      filePath: uploadData.path,
-    }),
-  })
-
-  if (!createResponse.ok) {
-    throw new Error("Failed to create document record")
-  }
-
-  const { data: documentData } = await createResponse.json()
-  return documentData.document
 }
 
 export async function deleteDocument(id: string): Promise<void> {
-  const response = await fetch(`/api/documents/${id}`, {
-    method: "DELETE",
-  })
+  try {
+    const response = await fetch(`/api/documents/${id}`, {
+      method: "DELETE",
+    })
 
-  if (!response.ok) {
-    throw new Error("Failed to delete document")
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(errorData.error || `Failed to delete document: ${response.status}`)
+    }
+  } catch (error) {
+    console.error("Error deleting document:", error)
+    throw error
   }
 }
 
@@ -101,88 +120,124 @@ export async function performSearch(userId: string, query: string, options: Sear
     params.append("to", options.dateRange.to.toISOString())
   }
 
-  const response = await fetch(`/api/search?${params.toString()}`)
+  try {
+    const response = await fetch(`/api/search?${params.toString()}`)
 
-  if (!response.ok) {
-    throw new Error("Failed to perform search")
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(errorData.error || `Search failed with status: ${response.status}`)
+    }
+
+    const { data } = await response.json()
+    return data.results || []
+  } catch (error) {
+    console.error("Search API error:", error)
+    throw error
   }
-
-  const { data } = await response.json()
-  return data.results || []
 }
 
 // Chat API methods
 export async function fetchConversations(userId: string): Promise<Conversation[]> {
-  const response = await fetch(`/api/conversations?userId=${userId}`)
+  try {
+    const response = await fetch(`/api/conversations?userId=${userId}`)
 
-  if (!response.ok) {
-    throw new Error("Failed to fetch conversations")
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(errorData.error || `Failed to fetch conversations: ${response.status}`)
+    }
+
+    const { data } = await response.json()
+    return data.conversations || []
+  } catch (error) {
+    console.error("Error fetching conversations:", error)
+    throw error
   }
-
-  const { data } = await response.json()
-  return data.conversations || []
 }
 
 export async function createConversation(userId: string, title: string): Promise<Conversation> {
-  const response = await fetch("/api/conversations", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      userId,
-      title,
-    }),
-  })
+  try {
+    const response = await fetch("/api/conversations", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        userId,
+        title,
+      }),
+    })
 
-  if (!response.ok) {
-    throw new Error("Failed to create conversation")
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(errorData.error || `Failed to create conversation: ${response.status}`)
+    }
+
+    const { data } = await response.json()
+    return data.conversation
+  } catch (error) {
+    console.error("Error creating conversation:", error)
+    throw error
   }
-
-  const { data } = await response.json()
-  return data.conversation
 }
 
 export async function fetchMessages(conversationId: string): Promise<ChatMessage[]> {
-  const response = await fetch(`/api/chat/messages?conversationId=${conversationId}`)
+  try {
+    const response = await fetch(`/api/chat/messages?conversationId=${conversationId}`)
 
-  if (!response.ok) {
-    throw new Error("Failed to fetch messages")
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(errorData.error || `Failed to fetch messages: ${response.status}`)
+    }
+
+    const { data } = await response.json()
+    return data.messages || []
+  } catch (error) {
+    console.error("Error fetching messages:", error)
+    throw error
   }
-
-  const { data } = await response.json()
-  return data.messages || []
 }
 
 export async function sendMessage(conversationId: string, content: string, userId: string): Promise<ChatMessage> {
-  const response = await fetch("/api/chat/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      conversationId,
-      content,
-      userId,
-    }),
-  })
+  try {
+    const response = await fetch("/api/chat/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        conversationId,
+        content,
+        userId,
+      }),
+    })
 
-  if (!response.ok) {
-    throw new Error("Failed to send message")
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(errorData.error || `Failed to send message: ${response.status}`)
+    }
+
+    const { data } = await response.json()
+    return data.message
+  } catch (error) {
+    console.error("Error sending message:", error)
+    throw error
   }
-
-  const { data } = await response.json()
-  return data.message
 }
 
 // Analytics API methods
 export async function fetchAnalytics(userId: string): Promise<AnalyticsData> {
-  const response = await fetch(`/api/analytics?userId=${userId}`)
+  try {
+    const response = await fetch(`/api/analytics?userId=${userId}`)
 
-  if (!response.ok) {
-    throw new Error("Failed to fetch analytics")
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(errorData.error || `Failed to fetch analytics: ${response.status}`)
+    }
+
+    const { data } = await response.json()
+    return data
+  } catch (error) {
+    console.error("Error fetching analytics:", error)
+    throw error
   }
-
-  const { data } = await response.json()
-  return data
 }

@@ -27,18 +27,46 @@ const MAX_KEYWORD_RESULTS = 100
  * Performs a search with the specified type
  */
 export async function performSearch(query: string, userId: string, options: SearchOptions): Promise<SearchResult[]> {
-  // Log the search query for analytics
-  await logSearchQuery(userId, query, options.type || "semantic", {
-    documentTypes: options.documentTypes,
-    sortBy: options.sortBy,
-    dateRange: options.dateRange,
-  })
+  console.log(`Performing ${options.type} search`, { query, userId })
 
-  // Perform search based on type
-  if (options.type === "semantic" || options.type === "hybrid") {
-    return semanticSearch(query, userId, options)
-  } else {
-    return keywordSearch(query, userId, options)
+  try {
+    // Perform search based on type
+    if (options.type === "hybrid") {
+      // For hybrid search, combine results from both semantic and keyword search
+      const [semanticResults, keywordResults] = await Promise.all([
+        semanticSearch(query, userId, options).catch((error) => {
+          console.error("Semantic search failed in hybrid search:", error)
+          return []
+        }),
+        keywordSearch(query, userId, options).catch((error) => {
+          console.error("Keyword search failed in hybrid search:", error)
+          return []
+        }),
+      ])
+
+      // Combine and deduplicate results
+      const combinedResults = [...semanticResults]
+      const semanticIds = new Set(semanticResults.map((result) => result.id))
+
+      // Add keyword results that aren't already in semantic results
+      for (const result of keywordResults) {
+        if (!semanticIds.has(result.id)) {
+          combinedResults.push(result)
+        }
+      }
+
+      // Sort by relevance
+      combinedResults.sort((a, b) => b.relevance - a.relevance)
+
+      return combinedResults
+    } else if (options.type === "semantic") {
+      return semanticSearch(query, userId, options)
+    } else {
+      return keywordSearch(query, userId, options)
+    }
+  } catch (error) {
+    console.error(`Search error (${options.type}):`, error)
+    throw new Error(`Search failed: ${error instanceof Error ? error.message : "Unknown error"}`)
   }
 }
 
@@ -51,29 +79,38 @@ export async function logSearchQuery(
   searchType: string,
   filters: Record<string, any>,
 ): Promise<void> {
-  await upsertVectors([
-    {
-      id: uuidv4(),
-      values: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector
-      metadata: {
-        user_id: userId,
-        query,
-        search_type: searchType,
-        filters: JSON.stringify(filters),
-        record_type: "search_history",
-        created_at: new Date().toISOString(),
+  try {
+    await upsertVectors([
+      {
+        id: uuidv4(),
+        values: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector
+        metadata: {
+          user_id: userId,
+          query,
+          search_type: searchType,
+          filters: JSON.stringify(filters),
+          record_type: "search_history",
+          created_at: new Date().toISOString(),
+        },
       },
-    },
-  ])
+    ])
+    console.log("Search query logged successfully", { userId, query, searchType })
+  } catch (error) {
+    console.error("Error logging search query:", error)
+    // Don't throw, just log the error
+  }
 }
 
 /**
  * Performs a semantic search using vector embeddings
  */
 async function semanticSearch(query: string, userId: string, options: SearchOptions): Promise<SearchResult[]> {
+  console.log("Performing semantic search", { query, userId })
+
   try {
     // Generate embedding for the query
     const embedding = await generateEmbedding(query)
+    console.log("Generated embedding for query", { dimensions: embedding.length })
 
     // Build filter based on document types if provided
     const filter: any = {
@@ -96,7 +133,13 @@ async function semanticSearch(query: string, userId: string, options: SearchOpti
     }
 
     // Perform vector similarity search in Pinecone
+    console.log("Querying Pinecone for semantic search", {
+      topK: DEFAULT_TOP_K,
+      filter: JSON.stringify(filter).substring(0, 100) + "...",
+    })
+
     const response = await queryVectors(embedding, DEFAULT_TOP_K, true, filter)
+    console.log("Pinecone query completed", { matchCount: response.matches?.length || 0 })
 
     // Format results
     return formatSearchResults(response.matches || [])
@@ -110,6 +153,8 @@ async function semanticSearch(query: string, userId: string, options: SearchOpti
  * Performs a keyword search
  */
 async function keywordSearch(query: string, userId: string, options: SearchOptions): Promise<SearchResult[]> {
+  console.log("Performing keyword search", { query, userId })
+
   try {
     // Build filter based on document types if provided
     const filter: any = {
@@ -132,19 +177,31 @@ async function keywordSearch(query: string, userId: string, options: SearchOptio
     }
 
     // Get all chunks for this user with the applied filters
+    console.log("Querying Pinecone for keyword search", {
+      maxResults: MAX_KEYWORD_RESULTS,
+      filter: JSON.stringify(filter).substring(0, 100) + "...",
+    })
+
     const response = await queryVectors(
       new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector
       MAX_KEYWORD_RESULTS,
       true,
       filter,
     )
+    console.log("Pinecone query completed", { totalChunks: response.matches?.length || 0 })
 
     // Filter chunks that contain the query keywords
-    const keywords = query.toLowerCase().split(/\s+/)
+    const keywords = query
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((k) => k.length > 1)
+    console.log("Filtering chunks by keywords", { keywords })
+
     const filteredChunks = (response.matches || []).filter((match) => {
       const content = ((match.metadata?.content as string) || "").toLowerCase()
       return keywords.some((keyword) => content.includes(keyword))
     })
+    console.log("Filtered chunks", { matchCount: filteredChunks.length })
 
     // Sort by keyword frequency (simple relevance)
     filteredChunks.sort((a, b) => {
@@ -176,36 +233,49 @@ async function keywordSearch(query: string, userId: string, options: SearchOptio
  * Formats search results from Pinecone matches
  */
 function formatSearchResults(matches: any[]): SearchResult[] {
-  return matches.map((match) => ({
-    id: match.id,
-    title: (match.metadata?.content as string)?.substring(0, 50) + "...",
-    content: (match.metadata?.content as string) || "",
-    documentName: (match.metadata?.document_name as string) || "Unknown Document",
-    documentType: (match.metadata?.document_type as string) || "UNKNOWN",
-    date: match.metadata?.created_at
-      ? new Date(match.metadata.created_at as string).toISOString().split("T")[0]
-      : new Date().toISOString().split("T")[0],
-    relevance: match.score || 0.8, // Use score if available, otherwise default to 0.8
-    highlights: generateHighlights(match.metadata?.content as string),
-  }))
+  return matches.map((match) => {
+    // Extract content and ensure it's a string
+    const content = (match.metadata?.content as string) || ""
+
+    // Create a title from the first 50 chars of content
+    const title = content.substring(0, 50) + (content.length > 50 ? "..." : "")
+
+    return {
+      id: match.id,
+      title: title,
+      content: content,
+      documentName: (match.metadata?.document_name as string) || "Unknown Document",
+      documentType: (match.metadata?.document_type as string) || "UNKNOWN",
+      date: match.metadata?.created_at
+        ? new Date(match.metadata.created_at as string).toISOString().split("T")[0]
+        : new Date().toISOString().split("T")[0],
+      relevance: match.score || 0.8, // Use score if available, otherwise default to 0.8
+      highlights: generateHighlights(content, match.metadata?.document_name as string),
+    }
+  })
 }
 
 /**
  * Generates highlight snippets from content
  */
-function generateHighlights(content: string): string[] {
+function generateHighlights(content: string, documentName?: string): string[] {
   if (!content) return []
 
   const contentLength = content.length
   const highlights = []
 
   // First highlight is the beginning of the content
-  highlights.push(`...${content.substring(0, Math.min(150, contentLength))}...`)
+  highlights.push(`${content.substring(0, Math.min(150, contentLength))}${contentLength > 150 ? "..." : ""}`)
 
   // If content is long enough, add a second highlight from the middle
   if (contentLength > 300) {
     const middleStart = Math.floor(contentLength / 2) - 75
     highlights.push(`...${content.substring(middleStart, middleStart + 150)}...`)
+  }
+
+  // Add document name to the highlights if available
+  if (documentName) {
+    highlights.push(`From document: ${documentName}`)
   }
 
   return highlights

@@ -31,11 +31,23 @@ export async function upsertVectors(vectors: any[], namespace = "") {
   console.log(`Upserting ${vectors.length} vectors to Pinecone index: ${indexName}`)
 
   try {
+    if (!apiKey) {
+      throw new Error("PINECONE_API_KEY is not defined")
+    }
+
+    if (!indexName) {
+      throw new Error("PINECONE_INDEX_NAME is not defined")
+    }
+
+    if (!environment) {
+      throw new Error("PINECONE_ENVIRONMENT is not defined")
+    }
+
     const response = await fetch(`${indexHost}/vectors/upsert`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Api-Key": apiKey || "",
+        "Api-Key": apiKey,
       },
       body: JSON.stringify({ vectors, namespace }),
     })
@@ -71,9 +83,24 @@ export async function queryVectors(
   filter?: Record<string, any>,
   namespace = "",
 ) {
-  console.log(`Querying Pinecone index: ${indexName}`, { topK, filter: JSON.stringify(filter).substring(0, 100) })
+  console.log(`Querying Pinecone index: ${indexName}`, {
+    topK,
+    filter: filter ? JSON.stringify(filter).substring(0, 100) + "..." : "none",
+  })
 
   try {
+    if (!apiKey) {
+      throw new Error("PINECONE_API_KEY is not defined")
+    }
+
+    if (!indexName) {
+      throw new Error("PINECONE_INDEX_NAME is not defined")
+    }
+
+    if (!environment) {
+      throw new Error("PINECONE_ENVIRONMENT is not defined")
+    }
+
     const queryBody: any = {
       vector,
       topK,
@@ -89,7 +116,7 @@ export async function queryVectors(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Api-Key": apiKey || "",
+        "Api-Key": apiKey,
       },
       body: JSON.stringify(queryBody),
     })
@@ -102,7 +129,7 @@ export async function queryVectors(
         indexName,
         environment,
         topK,
-        filter: filter ? JSON.stringify(filter).substring(0, 100) : "none",
+        filter: filter ? JSON.stringify(filter).substring(0, 100) + "..." : "none",
       })
       throw new Error(`Pinecone query failed: ${response.status} ${response.statusText} - ${errorText}`)
     }
@@ -126,11 +153,23 @@ export async function deleteVectors(ids: string[], namespace = "") {
   console.log(`Deleting ${ids.length} vectors from Pinecone index: ${indexName}`)
 
   try {
+    if (!apiKey) {
+      throw new Error("PINECONE_API_KEY is not defined")
+    }
+
+    if (!indexName) {
+      throw new Error("PINECONE_INDEX_NAME is not defined")
+    }
+
+    if (!environment) {
+      throw new Error("PINECONE_ENVIRONMENT is not defined")
+    }
+
     const response = await fetch(`${indexHost}/vectors/delete`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Api-Key": apiKey || "",
+        "Api-Key": apiKey,
       },
       body: JSON.stringify({ ids, namespace }),
     })

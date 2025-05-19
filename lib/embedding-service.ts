@@ -9,10 +9,18 @@ import { embed } from "ai"
  * Generate an embedding for the given text
  */
 export async function generateEmbedding(text: string): Promise<number[]> {
-  const { embedding } = await embed({
-    model: openai.embedding("text-embedding-3-small"),
-    value: text,
-  })
+  try {
+    console.log("Generating embedding for text", { textLength: text.length })
 
-  return embedding
+    const { embedding } = await embed({
+      model: openai.embedding("text-embedding-3-small"),
+      value: text,
+    })
+
+    console.log("Successfully generated embedding", { dimensions: embedding.length })
+    return embedding
+  } catch (error) {
+    console.error("Error generating embedding:", error)
+    throw new Error(`Failed to generate embedding: ${error instanceof Error ? error.message : "Unknown error"}`)
+  }
 }
