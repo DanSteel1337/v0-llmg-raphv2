@@ -25,6 +25,10 @@ export const POST = withErrorHandling(async (request: NextRequest) => {
         throw new Error("Text is required")
       }
 
+      if (text.trim() === "") {
+        throw new Error("Cannot generate embedding for empty or whitespace-only text")
+      }
+
       console.log(`POST /api/embeddings - Generating embedding`, {
         textLength: text.length,
         model: EMBEDDING_MODEL,
@@ -32,6 +36,15 @@ export const POST = withErrorHandling(async (request: NextRequest) => {
       })
 
       const embedding = await generateEmbedding(text)
+
+      // Double-check that embedding is not all zeros
+      if (embedding.every((v) => v === 0)) {
+        console.error("POST /api/embeddings - Generated an all-zero embedding", {
+          textSample: text.substring(0, 100) + "...",
+          textLength: text.length,
+        })
+        throw new Error("Invalid embedding generated: vector contains only zeros")
+      }
 
       console.log(`POST /api/embeddings - Successfully generated embedding`, {
         dimensions: embedding.length,

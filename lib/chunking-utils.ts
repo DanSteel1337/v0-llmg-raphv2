@@ -9,12 +9,40 @@
  */
 
 /**
+ * Checks if a chunk is informative enough to be embedded
+ */
+function isInformativeChunk(text: string): boolean {
+  if (!text || text.trim() === "") {
+    return false
+  }
+
+  // Skip chunks that are too short
+  if (text.trim().length < 10) {
+    return false
+  }
+
+  // Skip chunks that don't have enough unique words
+  const uniqueWords = new Set(
+    text
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((word) => word.length > 1),
+  )
+
+  if (uniqueWords.size < 3) {
+    return false
+  }
+
+  return true
+}
+
+/**
  * Chunks a document into smaller pieces for processing
  */
 export function chunkDocument(text: string, maxChunkSize: number, overlap = 100): string[] {
   // If text is smaller than max chunk size, return it as a single chunk
   if (text.length <= maxChunkSize) {
-    return [text]
+    return isInformativeChunk(text) ? [text] : []
   }
 
   // First try to split by natural sections like paragraphs
@@ -38,10 +66,19 @@ function groupParagraphsIntoChunks(paragraphs: string[], maxChunkSize: number, o
   let currentChunk = ""
 
   for (const paragraph of paragraphs) {
+    // Skip non-informative paragraphs
+    if (!isInformativeChunk(paragraph)) {
+      console.log("Skipping non-informative paragraph", {
+        paragraphLength: paragraph.length,
+        paragraphSample: paragraph.substring(0, 50) + "...",
+      })
+      continue
+    }
+
     // If adding this paragraph would exceed the max size, store the current chunk and start a new one
     if (currentChunk.length + paragraph.length + 2 > maxChunkSize) {
       // +2 for the newlines
-      if (currentChunk) {
+      if (currentChunk && isInformativeChunk(currentChunk)) {
         chunks.push(currentChunk)
       }
 
@@ -53,8 +90,8 @@ function groupParagraphsIntoChunks(paragraphs: string[], maxChunkSize: number, o
     }
   }
 
-  // Add the last chunk if it's not empty
-  if (currentChunk) {
+  // Add the last chunk if it's not empty and is informative
+  if (currentChunk && isInformativeChunk(currentChunk)) {
     chunks.push(currentChunk)
   }
 
@@ -67,9 +104,9 @@ function groupParagraphsIntoChunks(paragraphs: string[], maxChunkSize: number, o
 export function splitTextIntoChunks(text: string, maxChunkSize: number, overlap = 100): string[] {
   const chunks: string[] = []
 
-  // If text is smaller than max chunk size, return it as a single chunk
+  // If text is smaller than max chunk size, return it as a single chunk if informative
   if (text.length <= maxChunkSize) {
-    return [text]
+    return isInformativeChunk(text) ? [text] : []
   }
 
   let startIndex = 0
@@ -100,8 +137,18 @@ export function splitTextIntoChunks(text: string, maxChunkSize: number, overlap 
       endIndex = text.length
     }
 
-    // Add this chunk to the list
-    chunks.push(text.substring(startIndex, endIndex))
+    // Extract the chunk
+    const chunk = text.substring(startIndex, endIndex)
+
+    // Only add informative chunks
+    if (isInformativeChunk(chunk)) {
+      chunks.push(chunk)
+    } else {
+      console.log("Skipping non-informative chunk", {
+        chunkLength: chunk.length,
+        chunkSample: chunk.substring(0, 50) + "...",
+      })
+    }
 
     // Move the start index for the next chunk, accounting for overlap
     startIndex = endIndex - overlap
