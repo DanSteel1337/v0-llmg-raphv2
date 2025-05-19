@@ -11,7 +11,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { FileText, Search, MessageSquare, AlertCircle } from "lucide-react"
+import { FileText, Search, MessageSquare, Database, AlertCircle } from "lucide-react"
 import { DashboardCard } from "@/components/ui/dashboard-card"
 import { useAnalytics } from "@/hooks/use-analytics"
 import { useToast } from "@/components/toast"
@@ -47,6 +47,7 @@ export function AnalyticsWidget({ userId }: AnalyticsWidgetProps) {
     documentCount: analytics?.documentCount || 0,
     searchCount: analytics?.searchCount || 0,
     chatCount: analytics?.chatCount || 0,
+    chunkCount: analytics?.chunkCount || 0,
   }
 
   return (
@@ -64,7 +65,7 @@ export function AnalyticsWidget({ userId }: AnalyticsWidgetProps) {
           </div>
         )}
 
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="bg-blue-50 p-4 rounded-lg">
             <div className="flex items-center">
               <div className="p-2 rounded-md bg-blue-100">
@@ -93,6 +94,16 @@ export function AnalyticsWidget({ userId }: AnalyticsWidgetProps) {
             </div>
             <p className="mt-2 text-sm font-medium text-gray-500">Chats</p>
             <p className="text-2xl font-semibold text-gray-900">{metrics.chatCount}</p>
+          </div>
+
+          <div className="bg-amber-50 p-4 rounded-lg">
+            <div className="flex items-center">
+              <div className="p-2 rounded-md bg-amber-100">
+                <Database className="h-5 w-5 text-amber-600" />
+              </div>
+            </div>
+            <p className="mt-2 text-sm font-medium text-gray-500">Chunks</p>
+            <p className="text-2xl font-semibold text-gray-900">{metrics.chunkCount}</p>
           </div>
         </div>
       </div>

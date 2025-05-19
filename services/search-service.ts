@@ -14,7 +14,7 @@
  */
 
 import { v4 as uuidv4 } from "uuid"
-import { upsertVectors, queryVectors } from "@/lib/pinecone-rest-client"
+import { upsertVectors, queryVectors, getIndexStats } from "@/lib/pinecone-rest-client"
 import { generateEmbedding } from "@/lib/embedding-service"
 import { VECTOR_DIMENSION } from "@/lib/embedding-config"
 import type { SearchOptions, SearchResult } from "@/types"
@@ -22,6 +22,25 @@ import type { SearchOptions, SearchResult } from "@/types"
 // Constants
 const DEFAULT_TOP_K = 10
 const MAX_KEYWORD_RESULTS = 100
+
+/**
+ * Gets search count for a user
+ */
+export async function getSearchCountByUserId(userId: string): Promise<number> {
+  try {
+    const stats = await getIndexStats({
+      filter: {
+        user_id: { $eq: userId },
+        record_type: { $eq: "search_history" },
+      },
+    })
+
+    return stats.namespaces?.[""]?.vectorCount || 0
+  } catch (error) {
+    console.error("Error getting search count:", error)
+    return 0
+  }
+}
 
 /**
  * Performs a search with the specified type
@@ -58,11 +77,24 @@ export async function performSearch(query: string, userId: string, options: Sear
       // Sort by relevance
       combinedResults.sort((a, b) => b.relevance - a.relevance)
 
+      // Log search query for analytics
+      await logSearchQuery(userId, query, "hybrid", options)
+
       return combinedResults
     } else if (options.type === "semantic") {
-      return semanticSearch(query, userId, options)
+      const results = await semanticSearch(query, userId, options)
+
+      // Log search query for analytics
+      await logSearchQuery(userId, query, "semantic", options)
+
+      return results
     } else {
-      return keywordSearch(query, userId, options)
+      const results = await keywordSearch(query, userId, options)
+
+      // Log search query for analytics
+      await logSearchQuery(userId, query, "keyword", options)
+
+      return results
     }
   } catch (error) {
     console.error(`Search error (${options.type}):`, error)

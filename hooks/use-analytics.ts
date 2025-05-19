@@ -1,36 +1,54 @@
+"use client"
+
 /**
  * Analytics Hook
  *
- * Custom hook for fetching analytics data from the API.
+ * Custom hook for fetching and managing analytics data.
  *
  * Dependencies:
- * - @/hooks/use-api for API interaction
- * - @/types for analytics data types
+ * - @/services/client-api-service for API calls
  */
 
-"use client"
-
-import { useEffect, useCallback } from "react"
-import { useApi } from "@/hooks/use-api"
+import { useState, useEffect, useCallback } from "react"
 import { fetchAnalytics } from "@/services/client-api-service"
 import type { AnalyticsData } from "@/types"
 
 export function useAnalytics(userId: string) {
-  // Wrap the fetchAnalytics call with useCallback
-  const fetchAnalyticsCallback = useCallback(() => {
-    return fetchAnalytics(userId)
+  const [analytics, setAnalytics] = useState<AnalyticsData | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<Error | null>(null)
+
+  const fetchData = useCallback(async () => {
+    if (!userId) {
+      setIsLoading(false)
+      return
+    }
+
+    try {
+      setIsLoading(true)
+      setError(null)
+      const data = await fetchAnalytics(userId)
+      setAnalytics(data)
+    } catch (err) {
+      console.error("Error fetching analytics:", err)
+      setError(err instanceof Error ? err : new Error(String(err)))
+    } finally {
+      setIsLoading(false)
+    }
   }, [userId])
 
-  const { data, isLoading, error, execute: loadAnalytics } = useApi<AnalyticsData, []>(fetchAnalyticsCallback)
-
   useEffect(() => {
-    loadAnalytics()
-  }, [loadAnalytics])
+    fetchData()
+  }, [fetchData])
+
+  const refreshAnalytics = useCallback(() => {
+    fetchData()
+  }, [fetchData])
 
   return {
-    analytics: data,
+    analytics,
     isLoading,
     error,
-    refreshAnalytics: loadAnalytics,
+    refreshAnalytics,
   }
 }

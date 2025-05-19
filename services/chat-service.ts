@@ -15,7 +15,7 @@
  */
 
 import { v4 as uuidv4 } from "uuid"
-import { upsertVectors, queryVectors, deleteVectors } from "@/lib/pinecone-rest-client"
+import { upsertVectors, queryVectors, deleteVectors, getIndexStats } from "@/lib/pinecone-rest-client"
 import { generateEmbedding } from "@/lib/embedding-service"
 import { VECTOR_DIMENSION } from "@/lib/embedding-config"
 import { openai } from "@ai-sdk/openai"
@@ -60,6 +60,25 @@ export async function createConversation(userId: string, title?: string): Promis
   ])
 
   return conversation
+}
+
+/**
+ * Gets conversation count for a user
+ */
+export async function getConversationCountByUserId(userId: string): Promise<number> {
+  try {
+    const stats = await getIndexStats({
+      filter: {
+        user_id: { $eq: userId },
+        record_type: { $eq: "conversation" },
+      },
+    })
+
+    return stats.namespaces?.[""]?.vectorCount || 0
+  } catch (error) {
+    console.error("Error getting conversation count:", error)
+    return 0
+  }
 }
 
 /**

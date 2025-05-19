@@ -4,15 +4,14 @@
  * API endpoint for fetching analytics data from Pinecone.
  *
  * Dependencies:
- * - @/lib/pinecone-rest-client.ts for vector database access
+ * - @/services/analytics-service.ts for analytics operations
  * - @/lib/api-utils for API response handling
  */
 
 import type { NextRequest } from "next/server"
-import { queryVectors } from "@/lib/pinecone-rest-client"
+import { getAnalyticsData } from "@/services/analytics-service"
 import { handleApiRequest, extractUserId } from "@/lib/api-utils"
 import { withErrorHandling } from "@/lib/error-handler"
-import type { AnalyticsData } from "@/types"
 
 export const runtime = "edge"
 
@@ -22,56 +21,14 @@ export const GET = withErrorHandling(async (request: NextRequest) => {
       const userId = extractUserId(request)
       console.log(`GET /api/analytics - Fetching analytics for user`, { userId })
 
-      // Get document count
-      console.log(`GET /api/analytics - Querying document count`)
-      const documentQuery = await queryVectors(new Array(1536).fill(0), 1, true, {
-        user_id: { $eq: userId },
-        record_type: { $eq: "document" },
-      })
-
-      // Handle potential error from Pinecone
-      const documentCount = "error" in documentQuery && documentQuery.error ? 0 : documentQuery.matches?.length || 0
-
-      console.log(`GET /api/analytics - Document count query result`, { documentCount })
-
-      // Get search count
-      console.log(`GET /api/analytics - Querying search count`)
-      const searchQuery = await queryVectors(new Array(1536).fill(0), 1, true, {
-        user_id: { $eq: userId },
-        record_type: { $eq: "search_history" },
-      })
-
-      // Handle potential error from Pinecone
-      const searchCount = "error" in searchQuery && searchQuery.error ? 0 : searchQuery.matches?.length || 0
-
-      console.log(`GET /api/analytics - Search count query result`, { searchCount })
-
-      // Get chat count
-      console.log(`GET /api/analytics - Querying chat count`)
-      const chatQuery = await queryVectors(new Array(1536).fill(0), 1, true, {
-        user_id: { $eq: userId },
-        record_type: { $eq: "conversation" },
-      })
-
-      // Handle potential error from Pinecone
-      const chatCount = "error" in chatQuery && chatQuery.error ? 0 : chatQuery.matches?.length || 0
-
-      console.log(`GET /api/analytics - Chat count query result`, { chatCount })
-
-      // Construct analytics data
-      const analyticsData: AnalyticsData = {
-        documentCount,
-        searchCount,
-        chatCount,
-        topDocuments: [],
-        topSearches: [],
-      }
+      const analyticsData = await getAnalyticsData(userId)
 
       console.log(`GET /api/analytics - Successfully fetched analytics data`, {
         userId,
-        documentCount,
-        searchCount,
-        chatCount,
+        documentCount: analyticsData.documentCount,
+        searchCount: analyticsData.searchCount,
+        chatCount: analyticsData.chatCount,
+        chunkCount: analyticsData.chunkCount,
       })
 
       return analyticsData

@@ -112,6 +112,7 @@ export interface AnalyticsData {
   documentCount: number
   searchCount: number
   chatCount: number
+  chunkCount: number
   topDocuments: {
     name: string
     accessCount: number

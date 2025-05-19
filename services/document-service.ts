@@ -14,7 +14,7 @@
  */
 
 import { v4 as uuidv4 } from "uuid"
-import { upsertVectors, queryVectors, deleteVectors } from "@/lib/pinecone-rest-client"
+import { upsertVectors, queryVectors, deleteVectors, getIndexStats } from "@/lib/pinecone-rest-client"
 import { generateEmbedding } from "@/lib/embedding-service"
 import { chunkDocument } from "@/lib/chunking-utils"
 import { VECTOR_DIMENSION, EMBEDDING_MODEL } from "@/lib/embedding-config"
@@ -106,6 +106,25 @@ export async function getDocumentsByUserId(userId: string): Promise<Document[]> 
     created_at: match.metadata?.created_at as string,
     updated_at: match.metadata?.updated_at as string,
   }))
+}
+
+/**
+ * Gets document count for a user
+ */
+export async function getDocumentCountByUserId(userId: string): Promise<number> {
+  try {
+    const stats = await getIndexStats({
+      filter: {
+        user_id: { $eq: userId },
+        record_type: { $eq: "document" },
+      },
+    })
+
+    return stats.namespaces?.[""]?.vectorCount || 0
+  } catch (error) {
+    console.error("Error getting document count:", error)
+    return 0
+  }
 }
 
 /**
