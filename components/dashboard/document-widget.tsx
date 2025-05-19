@@ -14,7 +14,7 @@
 
 import type React from "react"
 
-import { useState, useRef } from "react"
+import { useState, useRef, useEffect } from "react"
 import { FileText, Upload, AlertCircle, CheckCircle } from "lucide-react"
 import { DashboardCard } from "@/components/ui/dashboard-card"
 import { useDocuments } from "@/hooks/use-documents"
@@ -28,10 +28,28 @@ interface DocumentWidgetProps {
 }
 
 export function DocumentWidget({ userId, limit = 5 }: DocumentWidgetProps) {
-  const { documents, isLoading, uploadDocument } = useDocuments(userId)
+  const { documents, isLoading, error, uploadDocument, refreshDocuments } = useDocuments(userId)
   const [isUploading, setIsUploading] = useState(false)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const { addToast } = useToast()
+
+  // Handle API errors
+  useEffect(() => {
+    if (error) {
+      console.error("Document widget error:", error)
+      setErrorMessage(error instanceof Error ? error.message : String(error))
+      addToast("Failed to load documents: " + (error instanceof Error ? error.message : "Unknown error"), "error")
+    } else {
+      setErrorMessage(null)
+    }
+  }, [error, addToast])
+
+  // Retry loading documents if there was an error
+  const handleRetry = () => {
+    setErrorMessage(null)
+    refreshDocuments()
+  }
 
   const recentDocuments = documents.slice(0, limit)
 
@@ -45,11 +63,14 @@ export function DocumentWidget({ userId, limit = 5 }: DocumentWidgetProps) {
 
     try {
       setIsUploading(true)
+      setErrorMessage(null)
       await uploadDocument(file)
       addToast("Document uploaded successfully", "success")
     } catch (error) {
-      addToast("Failed to upload document", "error")
       console.error("Upload error:", error)
+      const message = error instanceof Error ? error.message : "Unknown error occurred"
+      setErrorMessage(`Failed to upload: ${message}`)
+      addToast("Failed to upload document: " + message, "error")
     } finally {
       setIsUploading(false)
       // Reset the file input
@@ -75,6 +96,18 @@ export function DocumentWidget({ userId, limit = 5 }: DocumentWidgetProps) {
   return (
     <DashboardCard title="Documents" description="Recently uploaded documents" isLoading={isLoading && !isUploading}>
       <div className="space-y-4">
+        {errorMessage && (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md mb-4">
+            <div className="flex items-center">
+              <AlertCircle className="h-5 w-5 mr-2" />
+              <span>{errorMessage}</span>
+            </div>
+            <button onClick={handleRetry} className="mt-2 text-sm text-red-700 hover:text-red-900 underline">
+              Retry
+            </button>
+          </div>
+        )}
+
         <button
           onClick={handleUploadClick}
           disabled={isUploading}
@@ -119,7 +152,9 @@ export function DocumentWidget({ userId, limit = 5 }: DocumentWidgetProps) {
           </ul>
         ) : (
           <div className="text-center py-4 text-gray-500">
-            No documents yet. Upload your first document to get started.
+            {errorMessage
+              ? "Unable to load documents. Please try again."
+              : "No documents yet. Upload your first document to get started."}
           </div>
         )}
       </div>

@@ -2,8 +2,8 @@ import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 import { createMiddlewareClient } from "@supabase/auth-helpers-nextjs"
 
-// Fix: Change from "edge" to "experimental-edge" for middleware
-export const runtime = "experimental-edge"
+// Fix: Change from "experimental-edge" to "edge" for middleware
+export const runtime = "edge"
 
 // Supabase middleware requires a separate client instance (createMiddlewareClient)
 // This is the only file allowed to bypass the singleton client pattern

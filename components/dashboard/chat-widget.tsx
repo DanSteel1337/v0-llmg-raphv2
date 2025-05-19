@@ -10,10 +10,10 @@
  */
 
 "use client"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import type React from "react"
 
-import { MessageSquare, Plus, Send } from "lucide-react"
+import { MessageSquare, Plus, Send, AlertCircle } from "lucide-react"
 import { DashboardCard } from "@/components/ui/dashboard-card"
 import { formatDate } from "@/utils/formatting"
 import { useToast } from "@/components/toast"
@@ -28,24 +28,53 @@ export function ChatWidget({ userId }: ChatWidgetProps) {
   const {
     conversations,
     isLoadingConversations,
+    conversationsError,
     activeConversationId,
     setActiveConversationId,
     sendMessage,
     createConversation,
+    refreshConversations,
   } = useChat(userId)
   const [message, setMessage] = useState("")
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const { addToast } = useToast()
+
+  // Handle API errors
+  useEffect(() => {
+    if (conversationsError) {
+      console.error("Chat widget error:", conversationsError)
+      setErrorMessage(conversationsError instanceof Error ? conversationsError.message : String(conversationsError))
+      addToast(
+        "Failed to load conversations: " +
+          (conversationsError instanceof Error ? conversationsError.message : "Unknown error"),
+        "error",
+      )
+    } else {
+      setErrorMessage(null)
+    }
+  }, [conversationsError, addToast])
+
+  // Retry loading conversations if there was an error
+  const handleRetry = () => {
+    setErrorMessage(null)
+    refreshConversations()
+  }
 
   const handleNewChat = async () => {
     try {
+      setErrorMessage(null)
       await createConversation("New Conversation")
       addToast("Started a new conversation", "info")
     } catch (error) {
-      addToast("Failed to create conversation", "error")
+      console.error("Error creating conversation:", error)
+      const message = error instanceof Error ? error.message : "Unknown error"
+      setErrorMessage(`Failed to create conversation: ${message}`)
+      addToast("Failed to create conversation: " + message, "error")
     }
   }
 
   const handleOpenChat = (conversation: Conversation) => {
+    setErrorMessage(null)
     setActiveConversationId(conversation.id)
   }
 
@@ -54,20 +83,37 @@ export function ChatWidget({ userId }: ChatWidgetProps) {
     if (!message.trim()) return
 
     try {
+      setErrorMessage(null)
       await sendMessage(message)
       setMessage("")
     } catch (error) {
-      addToast("Failed to send message", "error")
+      console.error("Error sending message:", error)
+      const message = error instanceof Error ? error.message : "Unknown error"
+      setErrorMessage(`Failed to send message: ${message}`)
+      addToast("Failed to send message: " + message, "error")
     }
   }
 
   const handleBackToList = () => {
+    setErrorMessage(null)
     setActiveConversationId(undefined)
   }
 
   return (
     <DashboardCard title="Chat" description="Ask questions about your documents" isLoading={isLoadingConversations}>
       <div className="space-y-4">
+        {errorMessage && (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md mb-4">
+            <div className="flex items-center">
+              <AlertCircle className="h-5 w-5 mr-2" />
+              <span>{errorMessage}</span>
+            </div>
+            <button onClick={handleRetry} className="mt-2 text-sm text-red-700 hover:text-red-900 underline">
+              Retry
+            </button>
+          </div>
+        )}
+
         {!activeConversationId ? (
           <>
             <button
@@ -101,7 +147,9 @@ export function ChatWidget({ userId }: ChatWidgetProps) {
               </ul>
             ) : (
               <div className="text-center py-4 text-gray-500">
-                No conversations yet. Start a new chat to ask questions about your documents.
+                {errorMessage
+                  ? "Unable to load conversations. Please try again."
+                  : "No conversations yet. Start a new chat to ask questions about your documents."}
               </div>
             )}
           </>

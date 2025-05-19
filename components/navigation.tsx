@@ -24,7 +24,7 @@ import type React from "react"
 import { useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { FileText, Search, MessageSquare, BarChart2, Settings, Menu, X, LogOut, User } from "lucide-react"
+import { FileText, Menu, X, LogOut, User } from "lucide-react"
 import { useToast } from "./toast"
 import { useAuth } from "@/hooks/use-auth"
 
@@ -34,13 +34,8 @@ interface NavigationItem {
   icon: React.ElementType
 }
 
-const navigationItems: NavigationItem[] = [
-  { name: "Documents", href: "/documents", icon: FileText },
-  { name: "Search", href: "/search", icon: Search },
-  { name: "Chat", href: "/chat", icon: MessageSquare },
-  { name: "Analytics", href: "/analytics", icon: BarChart2 },
-  { name: "Settings", href: "/settings", icon: Settings },
-]
+// Updated navigation items to only include the dashboard
+const navigationItems: NavigationItem[] = [{ name: "Dashboard", href: "/dashboard", icon: FileText }]
 
 export function Navigation() {
   const pathname = usePathname()
@@ -54,6 +49,7 @@ export function Navigation() {
       addToast("Successfully signed out", "success")
     } catch (error) {
       addToast("Failed to sign out", "error")
+      console.error("Sign out error:", error)
     }
   }
 
@@ -88,7 +84,7 @@ export function Navigation() {
 
         <div className="mt-auto border-t border-gray-700 pt-4">
           <Link
-            href="/profile"
+            href="/dashboard"
             className="flex items-center px-4 py-3 text-gray-300 hover:bg-gray-800 hover:text-white"
           >
             <User className="mr-3 h-5 w-5" />
@@ -137,7 +133,7 @@ export function Navigation() {
 
             <div className="mt-auto border-t border-gray-700 pt-4">
               <Link
-                href="/profile"
+                href="/dashboard"
                 className="flex items-center px-4 py-3 text-gray-300 hover:bg-gray-800 hover:text-white"
                 onClick={() => setIsMobileMenuOpen(false)}
               >

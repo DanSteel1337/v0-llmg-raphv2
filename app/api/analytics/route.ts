@@ -18,41 +18,61 @@ export const runtime = "edge"
 
 export const GET = withErrorHandling(async (request: NextRequest) => {
   return handleApiRequest(async () => {
-    const userId = extractUserId(request)
+    try {
+      const userId = extractUserId(request)
+      console.log(`GET /api/analytics - Fetching analytics for user`, { userId })
 
-    // Get document count
-    const documentQuery = await queryVectors(new Array(1536).fill(0), 1, true, {
-      user_id: { $eq: userId },
-      record_type: { $eq: "document" },
-    })
+      // Get document count
+      console.log(`GET /api/analytics - Querying document count`)
+      const documentQuery = await queryVectors(new Array(1536).fill(0), 1, true, {
+        user_id: { $eq: userId },
+        record_type: { $eq: "document" },
+      })
+      const documentCount = documentQuery.matches?.length || 0
+      console.log(`GET /api/analytics - Document count query result`, { documentCount })
 
-    const documentCount = documentQuery.matches?.length || 0
+      // Get search count
+      console.log(`GET /api/analytics - Querying search count`)
+      const searchQuery = await queryVectors(new Array(1536).fill(0), 1, true, {
+        user_id: { $eq: userId },
+        record_type: { $eq: "search_history" },
+      })
+      const searchCount = searchQuery.matches?.length || 0
+      console.log(`GET /api/analytics - Search count query result`, { searchCount })
 
-    // Get search count
-    const searchQuery = await queryVectors(new Array(1536).fill(0), 1, true, {
-      user_id: { $eq: userId },
-      record_type: { $eq: "search_history" },
-    })
+      // Get chat count
+      console.log(`GET /api/analytics - Querying chat count`)
+      const chatQuery = await queryVectors(new Array(1536).fill(0), 1, true, {
+        user_id: { $eq: userId },
+        record_type: { $eq: "conversation" },
+      })
+      const chatCount = chatQuery.matches?.length || 0
+      console.log(`GET /api/analytics - Chat count query result`, { chatCount })
 
-    const searchCount = searchQuery.matches?.length || 0
+      // Construct analytics data
+      const analyticsData: AnalyticsData = {
+        documentCount,
+        searchCount,
+        chatCount,
+        topDocuments: [],
+        topSearches: [],
+      }
 
-    // Get chat count
-    const chatQuery = await queryVectors(new Array(1536).fill(0), 1, true, {
-      user_id: { $eq: userId },
-      record_type: { $eq: "conversation" },
-    })
+      console.log(`GET /api/analytics - Successfully fetched analytics data`, {
+        userId,
+        documentCount,
+        searchCount,
+        chatCount,
+      })
 
-    const chatCount = chatQuery.matches?.length || 0
-
-    // Construct analytics data
-    const analyticsData: AnalyticsData = {
-      documentCount,
-      searchCount,
-      chatCount,
-      topDocuments: [],
-      topSearches: [],
+      return analyticsData
+    } catch (error) {
+      console.error("GET /api/analytics - Error fetching analytics", {
+        error: error instanceof Error ? error.message : "Unknown error",
+        stack: error instanceof Error ? error.stack : undefined,
+        url: request.url,
+      })
+      throw error
     }
-
-    return analyticsData
   })
 })
