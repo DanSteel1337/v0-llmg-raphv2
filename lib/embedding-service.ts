@@ -4,18 +4,18 @@
 
 import { openai } from "@ai-sdk/openai"
 import { embed } from "ai"
-import { EMBEDDING_MODEL, VECTOR_DIMENSION } from "./embedding-config"
+import { EMBEDDING_MODEL, VECTOR_DIMENSION, validateVectorDimension } from "./embedding-config"
 
 /**
  * Validates if text is suitable for embedding
  */
 function validateInputText(text: string): void {
   if (!text || text.trim() === "") {
-    throw new Error("Cannot generate embedding for empty or whitespace-only text")
+    throw new Error("[EmbeddingService] Cannot generate embedding for empty or whitespace-only text")
   }
 
   if (text.length < 3) {
-    throw new Error("Text is too short for meaningful embedding generation")
+    throw new Error("[EmbeddingService] Text is too short for meaningful embedding generation")
   }
 }
 
@@ -29,7 +29,7 @@ export async function generateEmbedding(text: string): Promise<number[]> {
     // Validate input text before calling the API
     validateInputText(text)
 
-    console.log("Generating embedding for text", {
+    console.log("[EmbeddingService] Generating embedding for text", {
       textLength: text.length,
       model: EMBEDDING_MODEL,
       expectedDimension: VECTOR_DIMENSION,
@@ -44,21 +44,20 @@ export async function generateEmbedding(text: string): Promise<number[]> {
     const duration = Date.now() - startTime
 
     // Validate the embedding dimension
-    if (embedding.length !== VECTOR_DIMENSION) {
-      throw new Error(`Vector dimension mismatch: Expected ${VECTOR_DIMENSION}, got ${embedding.length}`)
-    }
+    validateVectorDimension(embedding)
 
-    console.log("Successfully generated embedding", {
+    console.log("[EmbeddingService] Successfully generated embedding", {
       dimensions: embedding.length,
       duration: `${duration}ms`,
       textLength: text.length,
+      nonZeroValues: embedding.filter((v) => v !== 0).length,
     })
 
     return embedding
   } catch (error) {
     const duration = Date.now() - startTime
 
-    console.error("Error generating embedding:", {
+    console.error("[EmbeddingService] Error generating embedding:", {
       error: error instanceof Error ? error.message : "Unknown error",
       stack: error instanceof Error ? error.stack : undefined,
       textSample: text ? `${text.substring(0, 100)}...` : "undefined",
@@ -67,7 +66,9 @@ export async function generateEmbedding(text: string): Promise<number[]> {
       model: EMBEDDING_MODEL,
     })
 
-    throw new Error(`Failed to generate embedding: ${error instanceof Error ? error.message : "Unknown error"}`)
+    throw new Error(
+      `[EmbeddingService] Failed to generate embedding: ${error instanceof Error ? error.message : "Unknown error"}`,
+    )
   }
 }
 
@@ -80,11 +81,11 @@ export async function generateEmbeddings(
   userId?: string,
 ): Promise<Array<{ text: string; embedding: number[] }>> {
   if (!texts.length) {
-    console.warn("No texts provided for embedding generation")
+    console.warn("[EmbeddingService] No texts provided for embedding generation")
     return []
   }
 
-  console.log(`Generating embeddings for ${texts.length} texts`, {
+  console.log(`[EmbeddingService] Generating embeddings for ${texts.length} texts`, {
     documentId,
     userId,
     model: EMBEDDING_MODEL,
@@ -101,16 +102,19 @@ export async function generateEmbeddings(
     const batchStartTime = Date.now()
 
     try {
-      console.log(`Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(texts.length / batchSize)}`, {
-        batchSize: batch.length,
-        documentId,
-      })
+      console.log(
+        `[EmbeddingService] Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(texts.length / batchSize)}`,
+        {
+          batchSize: batch.length,
+          documentId,
+        },
+      )
 
       // Filter out empty texts
       const validBatch = batch.filter((text) => text && text.trim() !== "")
 
       if (validBatch.length === 0) {
-        console.warn("Skipping batch with only empty texts")
+        console.warn("[EmbeddingService] Skipping batch with only empty texts")
         continue
       }
 
@@ -123,16 +127,13 @@ export async function generateEmbeddings(
       // Validate and add results
       for (let j = 0; j < validBatch.length; j++) {
         try {
-          if (embeddings[j].length !== VECTOR_DIMENSION) {
-            throw new Error(`Vector dimension mismatch: Expected ${VECTOR_DIMENSION}, got ${embeddings[j].length}`)
-          }
-
+          validateVectorDimension(embeddings[j])
           results.push({
             text: validBatch[j],
             embedding: embeddings[j],
           })
         } catch (error) {
-          console.error(`Error validating embedding for text at index ${i + j}:`, {
+          console.error(`[EmbeddingService] Error validating embedding for text at index ${i + j}:`, {
             error: error instanceof Error ? error.message : "Unknown error",
             textSample: validBatch[j].substring(0, 100) + "...",
             dimensions: embeddings[j]?.length,
@@ -143,13 +144,13 @@ export async function generateEmbeddings(
       }
 
       const batchDuration = Date.now() - batchStartTime
-      console.log(`Batch processed in ${batchDuration}ms`, {
+      console.log(`[EmbeddingService] Batch processed in ${batchDuration}ms`, {
         batchSize: batch.length,
         validTexts: validBatch.length,
         embeddingsGenerated: embeddings.length,
       })
     } catch (error) {
-      console.error(`Error generating embeddings for batch starting at index ${i}:`, {
+      console.error(`[EmbeddingService] Error generating embeddings for batch starting at index ${i}:`, {
         error: error instanceof Error ? error.message : "Unknown error",
         batchSize: batch.length,
         documentId,
@@ -164,7 +165,7 @@ export async function generateEmbeddings(
   }
 
   const duration = Date.now() - startTime
-  console.log(`Generated ${results.length}/${texts.length} embeddings in ${duration}ms`, {
+  console.log(`[EmbeddingService] Generated ${results.length}/${texts.length} embeddings in ${duration}ms`, {
     documentId,
     model: EMBEDDING_MODEL,
     dimensions: VECTOR_DIMENSION,

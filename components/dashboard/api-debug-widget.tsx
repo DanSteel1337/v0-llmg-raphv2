@@ -15,6 +15,7 @@ import { useState } from "react"
 import { Code, Play, ChevronDown, ChevronUp, Copy, Check, Key, Cpu } from "lucide-react"
 import { DashboardCard } from "@/components/ui/dashboard-card"
 import { useToast } from "@/components/toast"
+import { EMBEDDING_MODEL } from "@/lib/embedding-config"
 
 interface ApiDebugWidgetProps {
   userId: string
@@ -134,7 +135,7 @@ export function ApiDebugWidget({ userId }: ApiDebugWidgetProps) {
       name: "Generate Embedding",
       method: "POST",
       path: "/api/embeddings",
-      description: "Generate an embedding using text-embedding-3-large",
+      description: `Generate an embedding using ${EMBEDDING_MODEL}`,
       requiresBody: true,
       defaultBody: JSON.stringify(
         {
@@ -199,10 +200,6 @@ export function ApiDebugWidget({ userId }: ApiDebugWidgetProps) {
       const startTime = Date.now()
       const response = await fetch(url, options)
       const duration = Date.now() - startTime
-
-      if (response.status === 405) {
-        throw new Error("Request failed: endpoint does not support this method.")
-      }
 
       const data = await response.json()
 
@@ -312,7 +309,7 @@ export function ApiDebugWidget({ userId }: ApiDebugWidgetProps) {
               </div>
               <div className="text-xs text-gray-500">
                 <p>
-                  Current embedding model: <span className="font-mono">text-embedding-3-large</span>
+                  Current embedding model: <span className="font-mono">{EMBEDDING_MODEL}</span>
                 </p>
                 <div className="flex space-x-4 mt-2">
                   <div className="flex items-center">

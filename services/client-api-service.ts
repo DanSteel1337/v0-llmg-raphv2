@@ -25,27 +25,7 @@ import { apiCall } from "./apiCall"
  * Fetch documents for a user
  */
 export async function fetchDocuments(userId: string): Promise<Document[]> {
-  try {
-    const response = await apiCall<{ documents: Document[] }>(`/api/documents?userId=${userId}`)
-
-    // Handle both response formats: { documents: [...] } or the documents array directly
-    if (response && "documents" in response && Array.isArray(response.documents)) {
-      return response.documents
-    } else if (Array.isArray(response)) {
-      return response
-    }
-
-    console.error("Invalid documents response format:", response)
-    return []
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("405")) {
-      console.error("Method not allowed when fetching documents. The API endpoint might not support GET requests.")
-      // Return empty array as fallback
-      return []
-    }
-    console.error("Error fetching documents:", error)
-    throw error
-  }
+  return await apiCall<Document[]>(`/api/documents?userId=${userId}`)
 }
 
 /**
@@ -107,27 +87,10 @@ export async function uploadDocument(
   formData.append("documentId", document.id)
   formData.append("filePath", document.file_path)
 
-  try {
-    const uploadResponse = await fetch("/api/documents/upload", {
-      method: "POST",
-      body: formData,
-    })
-
-    if (uploadResponse.status === 405) {
-      throw new Error(
-        "Upload failed: endpoint does not support this method. Please ensure the API route supports POST requests.",
-      )
-    }
-
-    if (!uploadResponse.ok) {
-      throw new Error(`Upload failed with status ${uploadResponse.status}: ${uploadResponse.statusText}`)
-    }
-
-    await uploadResponse.json()
-  } catch (error) {
-    console.error("File upload error:", error)
-    throw new Error(`File upload failed: ${error instanceof Error ? error.message : "Unknown error"}`)
-  }
+  await apiCall<{ success: boolean }>("/api/documents/upload", {
+    method: "POST",
+    body: formData,
+  })
 
   // Poll for document status updates
   if (onProgress) {
@@ -160,128 +123,63 @@ export async function uploadDocument(
  * Delete a document
  */
 export async function deleteDocument(documentId: string): Promise<{ success: boolean }> {
-  try {
-    return await apiCall<{ success: boolean }>(`/api/documents/${documentId}`, {
-      method: "DELETE",
-    })
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("405")) {
-      console.error(
-        `Method not allowed when deleting document ${documentId}. The API endpoint might not support DELETE requests.`,
-      )
-      throw new Error("This action is not supported. The server does not allow document deletion.")
-    }
-    console.error(`Error deleting document ${documentId}:`, error)
-    throw error
-  }
+  return await apiCall<{ success: boolean }>(`/api/documents/${documentId}`, {
+    method: "DELETE",
+  })
 }
 
 /**
  * Fetch analytics data
  */
 export async function fetchAnalytics(userId: string, timeRange = "7d"): Promise<AnalyticsData> {
-  try {
-    return await apiCall<AnalyticsData>(`/api/analytics?userId=${userId}&timeRange=${timeRange}`)
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("405")) {
-      console.error("Method not allowed when fetching analytics. The API endpoint might not support GET requests.")
-      throw new Error("Analytics data is not available. This feature is not supported.")
-    }
-    console.error("Error fetching analytics:", error)
-    throw error
-  }
+  return await apiCall<AnalyticsData>(`/api/analytics?userId=${userId}&timeRange=${timeRange}`)
 }
 
 /**
  * Check API health
  */
 export async function checkApiHealth(): Promise<{ status: string; services: Record<string, boolean> }> {
-  try {
-    return await apiCall<{ status: string; services: Record<string, boolean> }>("/api/debug/check-health")
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("405")) {
-      console.error("Method not allowed when checking API health. The API endpoint might not support GET requests.")
-      return { status: "unknown", services: {} }
-    }
-    console.error("Error checking API health:", error)
-    throw error
-  }
+  return await apiCall<{ status: string; services: Record<string, boolean> }>("/api/debug/check-health")
 }
 
 /**
  * Fetch conversations
  */
 export async function fetchConversations(userId: string): Promise<Conversation[]> {
-  try {
-    return await apiCall<Conversation[]>(`/api/conversations?userId=${userId}`)
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("405")) {
-      console.error("Method not allowed when fetching conversations. The API endpoint might not support GET requests.")
-      return []
-    }
-    console.error("Error fetching conversations:", error)
-    throw error
-  }
+  return await apiCall<Conversation[]>(`/api/conversations?userId=${userId}`)
 }
 
 /**
  * Create a new conversation
  */
 export async function createConversation(userId: string, title: string): Promise<Conversation> {
-  try {
-    return await apiCall<Conversation>("/api/conversations", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ userId, title }),
-    })
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("405")) {
-      console.error("Method not allowed when creating conversation. The API endpoint might not support POST requests.")
-      throw new Error("Creating conversations is not supported.")
-    }
-    console.error("Error creating conversation:", error)
-    throw error
-  }
+  return await apiCall<Conversation>("/api/conversations", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ userId, title }),
+  })
 }
 
 /**
  * Fetch messages for a conversation
  */
 export async function fetchMessages(conversationId: string): Promise<Message[]> {
-  try {
-    return await apiCall<Message[]>(`/api/chat/messages?conversationId=${conversationId}`)
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("405")) {
-      console.error("Method not allowed when fetching messages. The API endpoint might not support GET requests.")
-      return []
-    }
-    console.error("Error fetching messages:", error)
-    throw error
-  }
+  return await apiCall<Message[]>(`/api/chat/messages?conversationId=${conversationId}`)
 }
 
 /**
  * Send a message in a conversation
  */
 export async function sendMessage(conversationId: string, userId: string, content: string): Promise<Message> {
-  try {
-    return await apiCall<Message>("/api/chat/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ conversationId, userId, content }),
-    })
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("405")) {
-      console.error("Method not allowed when sending message. The API endpoint might not support POST requests.")
-      throw new Error("Sending messages is not supported.")
-    }
-    console.error("Error sending message:", error)
-    throw error
-  }
+  return await apiCall<Message>("/api/chat/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ conversationId, userId, content }),
+  })
 }
 
 /**
@@ -293,32 +191,23 @@ export async function performSearch(
   page = 1,
   limit = 10,
 ): Promise<SearchResults> {
-  try {
-    // Construct query string
-    let queryString = `query=${encodeURIComponent(query)}&page=${page}&limit=${limit}`
+  // Construct query string
+  let queryString = `query=${encodeURIComponent(query)}&page=${page}&limit=${limit}`
 
-    // Add filters if provided
-    if (filters) {
-      Object.entries(filters).forEach(([key, value]) => {
-        if (Array.isArray(value)) {
-          value.forEach((v) => {
-            queryString += `&${key}=${encodeURIComponent(v)}`
-          })
-        } else {
-          queryString += `&${key}=${encodeURIComponent(value)}`
-        }
-      })
-    }
-
-    return await apiCall<SearchResults>(`/api/search?${queryString}`)
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("405")) {
-      console.error("Method not allowed when performing search. The API endpoint might not support GET requests.")
-      return { results: [], totalResults: 0, page: 1, totalPages: 0 }
-    }
-    console.error("Error performing search:", error)
-    throw error
+  // Add filters if provided
+  if (filters) {
+    Object.entries(filters).forEach(([key, value]) => {
+      if (Array.isArray(value)) {
+        value.forEach((v) => {
+          queryString += `&${key}=${encodeURIComponent(v)}`
+        })
+      } else {
+        queryString += `&${key}=${encodeURIComponent(value)}`
+      }
+    })
   }
+
+  return await apiCall<SearchResults>(`/api/search?${queryString}`)
 }
 
 // Type definitions for the API responses

@@ -15,7 +15,7 @@
 import type React from "react"
 
 import { useState, useRef, useEffect } from "react"
-import { FileText, Upload, AlertCircle, CheckCircle, RefreshCw } from "lucide-react"
+import { FileText, Upload, AlertCircle, CheckCircle } from "lucide-react"
 import { DashboardCard } from "@/components/ui/dashboard-card"
 import { useDocuments } from "@/hooks/use-documents"
 import { formatFileSize, formatDate } from "@/utils/formatting"
@@ -28,7 +28,7 @@ interface DocumentWidgetProps {
 }
 
 export function DocumentWidget({ userId, limit = 5 }: DocumentWidgetProps) {
-  const { documents, isLoading, error, uploadDocument, refreshDocuments, deleteDocument } = useDocuments(userId)
+  const { documents, isLoading, error, uploadDocument, refreshDocuments } = useDocuments(userId)
   const [isUploading, setIsUploading] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -110,11 +110,7 @@ export function DocumentWidget({ userId, limit = 5 }: DocumentWidgetProps) {
               <AlertCircle className="h-5 w-5 mr-2" />
               <span>{errorMessage}</span>
             </div>
-            <button
-              onClick={handleRetry}
-              className="mt-2 text-sm text-red-700 hover:text-red-900 underline flex items-center"
-            >
-              <RefreshCw className="h-3 w-3 mr-1" />
+            <button onClick={handleRetry} className="mt-2 text-sm text-red-700 hover:text-red-900 underline">
               Retry
             </button>
           </div>
@@ -123,7 +119,7 @@ export function DocumentWidget({ userId, limit = 5 }: DocumentWidgetProps) {
         <button
           onClick={handleUploadClick}
           disabled={isUploading}
-          className="w-full flex items-center justify-center px-4 py-2 border border-dashed border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="w-full flex items-center justify-center px-4 py-2 border border-dashed border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
         >
           {isUploading ? (
             <>

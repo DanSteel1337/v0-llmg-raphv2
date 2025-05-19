@@ -10,66 +10,101 @@ const isClient = typeof window !== "undefined"
 
 // Get embedding configuration based on environment variables
 export const getEmbeddingConfig = () => {
-  // If we're on the client side, return client-safe defaults
+  // If we're on the client side, throw a clear error or return client-safe defaults
   if (isClient) {
+    console.warn("[EmbeddingConfig] Attempted to access server-only configuration on the client side")
     return {
       model: "text-embedding-3-large",
       dimensions: 3072,
-      indexName: "client-side-placeholder",
-      host: "client-side-placeholder",
+      indexName: "pinecone-index", // This is just a placeholder
+      host: "https://api.example.com", // This is just a placeholder
+      isClientSide: true,
     }
   }
 
-  // Server-side: validate required environment variables
-  const apiKey = process.env.PINECONE_API_KEY
+  const model = process.env.EMBEDDING_MODEL
   const indexName = process.env.PINECONE_INDEX_NAME
   const host = process.env.PINECONE_HOST
 
-  if (!apiKey) {
-    throw new Error("[EmbeddingConfig] Missing required environment variable: PINECONE_API_KEY")
+  // Validate required environment variables
+  const missingVars = []
+  if (!model) missingVars.push("EMBEDDING_MODEL")
+  if (!indexName) missingVars.push("PINECONE_INDEX_NAME")
+  if (!host) missingVars.push("PINECONE_HOST")
+
+  if (missingVars.length > 0) {
+    throw new Error(`[EmbeddingConfig] Missing required env vars: ${missingVars.join(", ")}`)
   }
 
-  if (!indexName) {
-    throw new Error("[EmbeddingConfig] Missing required environment variable: PINECONE_INDEX_NAME")
+  // Validate model
+  if (model !== "text-embedding-3-large") {
+    throw new Error(`[EmbeddingConfig] Unsupported model: ${model}. Only text-embedding-3-large is supported.`)
   }
 
-  if (!host) {
-    throw new Error("[EmbeddingConfig] Missing required environment variable: PINECONE_HOST")
+  // Validate host format
+  if (!host.startsWith("https://")) {
+    throw new Error(`[EmbeddingConfig] Invalid PINECONE_HOST format: ${host}. Must start with https://`)
   }
 
-  // Minimal, hardcoded server-only configuration for embedding model and Pinecone
+  // Extract index slug from host and validate it matches indexName
+  const hostParts = host.split(".")
+  if (hostParts.length < 2) {
+    throw new Error(`[EmbeddingConfig] Invalid PINECONE_HOST format: ${host}`)
+  }
+
+  const hostIndexSlug = hostParts[0].split("//")[1]
+  if (!hostIndexSlug || !hostIndexSlug.includes(indexName.toLowerCase())) {
+    console.warn(
+      `[EmbeddingConfig] Warning: PINECONE_INDEX_NAME (${indexName}) may not match host index slug (${hostIndexSlug})`,
+    )
+  }
+
+  // Fixed dimensions for text-embedding-3-large
+  const dimensions = 3072
+
+  // Log the configuration
+  console.log("[EmbeddingConfig] Configuration initialized:", {
+    model,
+    indexName,
+    host: host.split(".")[0], // Only log the first part for security
+    dimensions,
+  })
+
   return {
-    model: "text-embedding-3-large",
-    dimensions: 3072,
+    model,
     indexName,
     host,
+    dimensions,
+    isClientSide: false,
   }
 }
 
 // Create a safe version of the config that won't throw on the client side
-let config
+let config: ReturnType<typeof getEmbeddingConfig>
 try {
   config = getEmbeddingConfig()
 } catch (error) {
   if (isClient) {
-    // Client-side fallback
+    console.warn("[EmbeddingConfig] Using client-side fallback configuration")
     config = {
       model: "text-embedding-3-large",
       dimensions: 3072,
-      indexName: "client-side-placeholder",
-      host: "client-side-placeholder",
+      indexName: "pinecone-index", // This is just a placeholder
+      host: "https://api.example.com", // This is just a placeholder
+      isClientSide: true,
     }
   } else {
-    // Re-throw on server side
+    // Re-throw the error on the server side
     throw error
   }
 }
 
 // Export the configuration values
-export const EMBEDDING_MODEL = "text-embedding-3-large"
-export const VECTOR_DIMENSION = 3072
+export const EMBEDDING_MODEL = config.model
+export const VECTOR_DIMENSION = config.dimensions
 export const INDEX_NAME = config.indexName
 export const PINECONE_HOST = config.host
+export const IS_CLIENT_SIDE = config.isClientSide
 
 // Validate vector dimensions against the expected dimension
 export function validateVectorDimension(vector: number[]): void {
@@ -83,10 +118,25 @@ export function validateVectorDimension(vector: number[]): void {
         `Make sure you're using the correct embedding model (${EMBEDDING_MODEL}).`,
     )
   }
+
+  // Check if vector is all zeros or has very few non-zero values
+  const nonZeroCount = vector.filter((v) => v !== 0).length
+  if (nonZeroCount === 0) {
+    throw new Error("[EmbeddingConfig] Invalid vector: contains only zeros")
+  }
+
+  if (nonZeroCount < vector.length * 0.01) {
+    console.warn("[EmbeddingConfig] Warning: Vector has very few non-zero values", {
+      totalDimensions: vector.length,
+      nonZeroDimensions: nonZeroCount,
+    })
+  }
 }
 
 // Create a dummy vector with the correct dimensions for testing/querying
 export function createDummyVector(): number[] {
+  // Create a vector with small random values instead of all zeros
+  // This helps avoid issues with zero vectors in some vector DBs
   return Array(VECTOR_DIMENSION)
     .fill(0)
     .map(() => Math.random() * 0.001)
