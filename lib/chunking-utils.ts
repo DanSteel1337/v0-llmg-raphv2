@@ -2,15 +2,69 @@
  * Chunking Utilities
  *
  * Utility functions for text chunking and processing.
+ * These functions are Edge-compatible and don't rely on any Node.js modules.
  *
  * Dependencies:
  * - None
  */
 
 /**
+ * Chunks a document into smaller pieces for processing
+ */
+export function chunkDocument(text: string, maxChunkSize: number, overlap = 100): string[] {
+  // If text is smaller than max chunk size, return it as a single chunk
+  if (text.length <= maxChunkSize) {
+    return [text]
+  }
+
+  // First try to split by natural sections like paragraphs
+  const paragraphs = text.split(/\n\s*\n/)
+
+  // If we have multiple paragraphs and they're all smaller than the max size,
+  // we can group them into chunks
+  if (paragraphs.length > 1 && paragraphs.every((p) => p.length < maxChunkSize)) {
+    return groupParagraphsIntoChunks(paragraphs, maxChunkSize, overlap)
+  }
+
+  // Otherwise, fall back to splitting text directly
+  return splitTextIntoChunks(text, maxChunkSize, overlap)
+}
+
+/**
+ * Groups paragraphs into chunks of a specified maximum size
+ */
+function groupParagraphsIntoChunks(paragraphs: string[], maxChunkSize: number, overlap = 100): string[] {
+  const chunks: string[] = []
+  let currentChunk = ""
+
+  for (const paragraph of paragraphs) {
+    // If adding this paragraph would exceed the max size, store the current chunk and start a new one
+    if (currentChunk.length + paragraph.length + 2 > maxChunkSize) {
+      // +2 for the newlines
+      if (currentChunk) {
+        chunks.push(currentChunk)
+      }
+
+      // Start a new chunk
+      currentChunk = paragraph
+    } else {
+      // Add paragraph to current chunk
+      currentChunk = currentChunk ? currentChunk + "\n\n" + paragraph : paragraph
+    }
+  }
+
+  // Add the last chunk if it's not empty
+  if (currentChunk) {
+    chunks.push(currentChunk)
+  }
+
+  return chunks
+}
+
+/**
  * Splits text into chunks of a specified size
  */
-export function splitTextIntoChunks(text: string, maxChunkSize: number, overlap = 0): string[] {
+export function splitTextIntoChunks(text: string, maxChunkSize: number, overlap = 100): string[] {
   const chunks: string[] = []
 
   // If text is smaller than max chunk size, return it as a single chunk
@@ -27,11 +81,13 @@ export function splitTextIntoChunks(text: string, maxChunkSize: number, overlap 
     // If we're not at the end of the text, try to find a natural break point
     if (endIndex < text.length) {
       // Look for a period, question mark, or exclamation mark followed by a space or newline
-      const naturalBreakMatch = text.substring(endIndex - 100, endIndex + 100).match(/[.!?]\s+/g)
+      const naturalBreakMatch = text
+        .substring(Math.max(endIndex - 100, startIndex), Math.min(endIndex + 100, text.length))
+        .match(/[.!?]\s+/)
 
       if (naturalBreakMatch && naturalBreakMatch.index !== undefined) {
         // Adjust endIndex to the natural break point
-        endIndex = endIndex - 100 + naturalBreakMatch.index + naturalBreakMatch[0].length
+        endIndex = Math.max(endIndex - 100, startIndex) + naturalBreakMatch.index + naturalBreakMatch[0].length
       } else {
         // If no natural break found, look for a space
         const lastSpace = text.lastIndexOf(" ", endIndex)
@@ -49,6 +105,11 @@ export function splitTextIntoChunks(text: string, maxChunkSize: number, overlap 
 
     // Move the start index for the next chunk, accounting for overlap
     startIndex = endIndex - overlap
+
+    // Make sure we're making progress
+    if (startIndex >= endIndex) {
+      startIndex = endIndex
+    }
   }
 
   return chunks

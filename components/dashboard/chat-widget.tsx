@@ -32,10 +32,8 @@ export function ChatWidget({ userId }: ChatWidgetProps) {
     setActiveConversationId,
     sendMessage,
     createConversation,
-    messages,
-    isLoadingMessages,
   } = useChat(userId)
-  const [input, setInput] = useState("")
+  const [message, setMessage] = useState("")
   const { addToast } = useToast()
 
   const handleNewChat = async () => {
@@ -53,11 +51,11 @@ export function ChatWidget({ userId }: ChatWidgetProps) {
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!input.trim()) return
+    if (!message.trim()) return
 
     try {
-      await sendMessage(input)
-      setInput("")
+      await sendMessage(message)
+      setMessage("")
     } catch (error) {
       addToast("Failed to send message", "error")
     }
@@ -119,33 +117,14 @@ export function ChatWidget({ userId }: ChatWidgetProps) {
             </div>
 
             <div className="flex-1 bg-gray-50 rounded-md p-3 mb-3 overflow-y-auto">
-              {isLoadingMessages ? (
-                <div className="flex justify-center items-center h-full">
-                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-500"></div>
-                </div>
-              ) : messages.length > 0 ? (
-                <div className="space-y-3">
-                  {messages.map((message) => (
-                    <div
-                      key={message.id}
-                      className={`p-2 rounded-lg ${message.role === "user" ? "bg-blue-100 ml-6" : "bg-gray-100 mr-6"}`}
-                    >
-                      <p className="text-sm">{message.content}</p>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center text-gray-500 text-sm py-4">
-                  Start asking questions about your documents.
-                </div>
-              )}
+              <div className="text-center text-gray-500 text-sm py-4">Start asking questions about your documents.</div>
             </div>
 
             <form onSubmit={handleSendMessage} className="flex">
               <input
                 type="text"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
                 placeholder="Type your message..."
                 className="flex-1 border border-gray-300 rounded-l-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />

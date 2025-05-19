@@ -8,12 +8,14 @@
  * - Search analytics logging
  *
  * Dependencies:
- * - @/lib/pinecone-client.ts for vector storage and retrieval
+ * - @/lib/pinecone-rest-client.ts for vector storage and retrieval
+ * - @/lib/embedding-service.ts for embeddings
  * - uuid for ID generation
  */
 
 import { v4 as uuidv4 } from "uuid"
-import { getPineconeIndex } from "@/lib/pinecone-client"
+import { upsertVectors, queryVectors } from "@/lib/pinecone-rest-client"
+import { generateEmbedding } from "@/lib/embedding-service"
 import type { SearchOptions, SearchResult } from "@/types"
 
 // Constants
@@ -49,27 +51,20 @@ export async function logSearchQuery(
   searchType: string,
   filters: Record<string, any>,
 ): Promise<void> {
-  const pineconeIndex = await getPineconeIndex()
-
-  await pineconeIndex.upsert({
-    upsertRequest: {
-      vectors: [
-        {
-          id: uuidv4(),
-          values: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector
-          metadata: {
-            user_id: userId,
-            query,
-            search_type: searchType,
-            filters: JSON.stringify(filters),
-            record_type: "search_history",
-            created_at: new Date().toISOString(),
-          },
-        },
-      ],
-      namespace: "",
+  await upsertVectors([
+    {
+      id: uuidv4(),
+      values: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector
+      metadata: {
+        user_id: userId,
+        query,
+        search_type: searchType,
+        filters: JSON.stringify(filters),
+        record_type: "search_history",
+        created_at: new Date().toISOString(),
+      },
     },
-  })
+  ])
 }
 
 /**
@@ -77,20 +72,8 @@ export async function logSearchQuery(
  */
 async function semanticSearch(query: string, userId: string, options: SearchOptions): Promise<SearchResult[]> {
   try {
-    // Generate embedding for the query using our API endpoint
-    const embeddingResponse = await fetch("/api/embeddings", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ text: query }),
-    })
-
-    if (!embeddingResponse.ok) {
-      throw new Error("Failed to generate embedding")
-    }
-
-    const { embedding } = await embeddingResponse.json()
+    // Generate embedding for the query
+    const embedding = await generateEmbedding(query)
 
     // Build filter based on document types if provided
     const filter: any = {
@@ -113,19 +96,10 @@ async function semanticSearch(query: string, userId: string, options: SearchOpti
     }
 
     // Perform vector similarity search in Pinecone
-    const pineconeIndex = await getPineconeIndex()
-    const queryResponse = await pineconeIndex.query({
-      queryRequest: {
-        vector: embedding,
-        topK: DEFAULT_TOP_K,
-        includeMetadata: true,
-        filter,
-        namespace: "",
-      },
-    })
+    const response = await queryVectors(embedding, DEFAULT_TOP_K, true, filter)
 
     // Format results
-    return formatSearchResults(queryResponse.matches || [])
+    return formatSearchResults(response.matches || [])
   } catch (error) {
     console.error("Error performing semantic search:", error)
     throw error
@@ -158,20 +132,16 @@ async function keywordSearch(query: string, userId: string, options: SearchOptio
     }
 
     // Get all chunks for this user with the applied filters
-    const pineconeIndex = await getPineconeIndex()
-    const queryResponse = await pineconeIndex.query({
-      queryRequest: {
-        vector: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector
-        topK: MAX_KEYWORD_RESULTS,
-        includeMetadata: true,
-        filter,
-        namespace: "",
-      },
-    })
+    const response = await queryVectors(
+      new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector
+      MAX_KEYWORD_RESULTS,
+      true,
+      filter,
+    )
 
     // Filter chunks that contain the query keywords
     const keywords = query.toLowerCase().split(/\s+/)
-    const filteredChunks = (queryResponse.matches || []).filter((match) => {
+    const filteredChunks = (response.matches || []).filter((match) => {
       const content = ((match.metadata?.content as string) || "").toLowerCase()
       return keywords.some((keyword) => content.includes(keyword))
     })
