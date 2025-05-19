@@ -27,9 +27,26 @@ const nextConfig = {
         net: false,
         tls: false,
         child_process: false,
+        "node:stream": false,
+        "node:util": false,
+        "node:url": false,
+        "node:http": false,
+        "node:https": false,
+        "node:zlib": false,
+        "node:buffer": false,
       }
     }
+
+    // Explicitly mark these packages as external for server-side
+    if (isServer) {
+      config.externals = [...(config.externals || []), "fs", "path", "stream", "node:stream"]
+    }
+
     return config
+  },
+  // Explicitly tell Next.js which packages are server-only
+  experimental: {
+    serverComponentsExternalPackages: ["@pinecone-database/pinecone", "fs", "path", "stream", "node:stream"],
   },
 }
 
