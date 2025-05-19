@@ -1,47 +1,31 @@
 /**
  * Client API Service
  *
- * Provides client-side API functions for interacting with the backend.
- * This service is used by React hooks to fetch data from the API.
+ * This file contains all client-side API functions for interacting with the server.
+ *
+ * EXPORTS:
+ * ---------
+ * - fetchDocuments: Fetches all documents for a user
+ * - uploadDocument: Uploads a document for a user
+ * - deleteDocument: Deletes a document by ID
+ * - fetchAnalytics: Fetches analytics data for a user
+ * - checkApiHealth: Checks the health of the API and its services
+ * - fetchConversations: Fetches all conversations for a user
+ * - createConversation: Creates a new conversation
+ * - fetchMessages: Fetches all messages for a conversation
+ * - sendMessage: Sends a message in a conversation
+ * - performSearch: Performs a search with optional filters
+ *
+ * IMPORTANT: When adding new functions to this file, please update the exports list above.
  */
 
-import type { Document, SearchResult, SearchOptions, Conversation, ChatMessage, AnalyticsData } from "@/types"
-
-/**
- * Base API call function with error handling
- */
-async function apiCall<T>(url: string, options?: RequestInit): Promise<T> {
-  try {
-    const response = await fetch(url, options)
-
-    if (!response.ok) {
-      let errorMessage = `API error: ${response.status} ${response.statusText}`
-
-      try {
-        const errorData = await response.json()
-        if (errorData.error) {
-          errorMessage = errorData.error
-        }
-      } catch (e) {
-        // Ignore JSON parsing errors
-      }
-
-      throw new Error(errorMessage)
-    }
-
-    return await response.json()
-  } catch (error) {
-    console.error(`API call failed: ${url}`, error)
-    throw error
-  }
-}
+import { apiCall } from "./apiCall"
 
 /**
  * Fetch documents for a user
  */
 export async function fetchDocuments(userId: string): Promise<Document[]> {
-  const { documents } = await apiCall<{ documents: Document[] }>(`/api/documents?userId=${encodeURIComponent(userId)}`)
-  return documents
+  return await apiCall<Document[]>(`/api/documents?userId=${userId}`)
 }
 
 /**
@@ -53,7 +37,7 @@ export async function uploadDocument(
   onProgress?: (progress: number) => void,
 ): Promise<Document> {
   // First, create a document record
-  const response = await apiCall<{ document: Document }>("/api/documents", {
+  const response = await apiCall<{ document: Document } | Document>("/api/documents", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -70,13 +54,19 @@ export async function uploadDocument(
   // Log the response for debugging
   console.log("Document creation response:", response)
 
-  // Validate document response
-  if (!response?.document) {
-    console.error("Invalid document response - missing document object:", response)
+  // Handle both response formats: { document: {...} } or the document directly
+  let document: Document
+
+  if ("document" in response && response.document) {
+    // Response format is { document: {...} }
+    document = response.document
+  } else if ("id" in response && response.id) {
+    // Response format is the document directly
+    document = response as Document
+  } else {
+    console.error("Invalid document response format:", response)
     throw new Error("Document upload failed: Invalid response format")
   }
-
-  const { document } = response
 
   // Validate document ID
   if (!document?.id || typeof document.id !== "string") {
@@ -132,131 +122,145 @@ export async function uploadDocument(
 /**
  * Delete a document
  */
-export async function deleteDocument(id: string): Promise<void> {
-  await apiCall<{ success: boolean }>(`/api/documents/${id}`, {
+export async function deleteDocument(documentId: string): Promise<{ success: boolean }> {
+  return await apiCall<{ success: boolean }>(`/api/documents/${documentId}`, {
     method: "DELETE",
   })
 }
 
 /**
- * Search documents
- */
-export async function performSearch(userId: string, query: string, options: SearchOptions): Promise<SearchResult[]> {
-  const params = new URLSearchParams({
-    userId,
-    q: query,
-    type: options.type,
-  })
-
-  if (options.documentTypes && options.documentTypes.length > 0) {
-    options.documentTypes.forEach((type) => params.append("documentTypes", type))
-  }
-
-  if (options.sortBy) {
-    params.append("sortBy", options.sortBy)
-  }
-
-  if (options.dateRange?.from) {
-    params.append("dateFrom", options.dateRange.from.toISOString())
-  }
-
-  if (options.dateRange?.to) {
-    params.append("dateTo", options.dateRange.to.toISOString())
-  }
-
-  const { results } = await apiCall<{ results: SearchResult[] }>(`/api/search?${params.toString()}`)
-  return results
-}
-
-/**
- * Fetch conversations for a user
- */
-export async function fetchConversations(userId: string): Promise<Conversation[]> {
-  const { conversations } = await apiCall<{ conversations: Conversation[] }>(
-    `/api/conversations?userId=${encodeURIComponent(userId)}`,
-  )
-  return conversations
-}
-
-/**
- * Create a new conversation
- */
-export async function createConversation(userId: string, title?: string): Promise<Conversation> {
-  const { conversation } = await apiCall<{ conversation: Conversation }>("/api/conversations", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      userId,
-      title: title || "New Conversation",
-    }),
-  })
-  return conversation
-}
-
-/**
- * Fetch messages for a conversation
- */
-export async function fetchMessages(conversationId: string): Promise<ChatMessage[]> {
-  const { messages } = await apiCall<{ messages: ChatMessage[] }>(
-    `/api/chat/messages?conversationId=${encodeURIComponent(conversationId)}`,
-  )
-  return messages
-}
-
-/**
- * Send a message in a conversation
- */
-export async function sendMessage(conversationId: string, content: string, userId: string): Promise<ChatMessage> {
-  const { message } = await apiCall<{ message: ChatMessage }>("/api/chat/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      conversationId,
-      content,
-      userId,
-    }),
-  })
-  return message
-}
-
-/**
  * Fetch analytics data
  */
-export async function fetchAnalytics(userId: string): Promise<AnalyticsData> {
-  const url = new URL(`/api/analytics`, window.location.origin)
-  url.searchParams.append("userId", userId)
-
-  // Add debug parameter if in debug mode
-  if (window.location.search.includes("debug=true")) {
-    url.searchParams.append("debug", "true")
-  }
-
-  return await apiCall<AnalyticsData>(url.toString())
+export async function fetchAnalytics(userId: string, timeRange = "7d"): Promise<AnalyticsData> {
+  return await apiCall<AnalyticsData>(`/api/analytics?userId=${userId}&timeRange=${timeRange}`)
 }
 
 /**
  * Check API health
  */
-export async function checkApiHealth(): Promise<{
-  pineconeApiHealthy: boolean
-  openaiApiHealthy: boolean
-}> {
-  try {
-    const response = await apiCall<{
-      pineconeApiHealthy: boolean
-      openaiApiHealthy: boolean
-    }>("/api/debug/check-health")
+export async function checkApiHealth(): Promise<{ status: string; services: Record<string, boolean> }> {
+  return await apiCall<{ status: string; services: Record<string, boolean> }>("/api/debug/check-health")
+}
 
-    return response
-  } catch (error) {
-    console.error("Error checking API health:", error)
-    return {
-      pineconeApiHealthy: false,
-      openaiApiHealthy: false,
-    }
+/**
+ * Fetch conversations
+ */
+export async function fetchConversations(userId: string): Promise<Conversation[]> {
+  return await apiCall<Conversation[]>(`/api/conversations?userId=${userId}`)
+}
+
+/**
+ * Create a new conversation
+ */
+export async function createConversation(userId: string, title: string): Promise<Conversation> {
+  return await apiCall<Conversation>("/api/conversations", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ userId, title }),
+  })
+}
+
+/**
+ * Fetch messages for a conversation
+ */
+export async function fetchMessages(conversationId: string): Promise<Message[]> {
+  return await apiCall<Message[]>(`/api/chat/messages?conversationId=${conversationId}`)
+}
+
+/**
+ * Send a message in a conversation
+ */
+export async function sendMessage(conversationId: string, userId: string, content: string): Promise<Message> {
+  return await apiCall<Message>("/api/chat/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ conversationId, userId, content }),
+  })
+}
+
+/**
+ * Perform search
+ */
+export async function performSearch(
+  query: string,
+  filters?: { [key: string]: string | string[] },
+  page = 1,
+  limit = 10,
+): Promise<SearchResults> {
+  // Construct query string
+  let queryString = `query=${encodeURIComponent(query)}&page=${page}&limit=${limit}`
+
+  // Add filters if provided
+  if (filters) {
+    Object.entries(filters).forEach(([key, value]) => {
+      if (Array.isArray(value)) {
+        value.forEach((v) => {
+          queryString += `&${key}=${encodeURIComponent(v)}`
+        })
+      } else {
+        queryString += `&${key}=${encodeURIComponent(value)}`
+      }
+    })
   }
+
+  return await apiCall<SearchResults>(`/api/search?${queryString}`)
+}
+
+// Type definitions for the API responses
+interface Document {
+  id: string
+  name: string
+  file_path: string
+  status?: string
+  processing_progress?: number
+  [key: string]: any
+}
+
+interface AnalyticsData {
+  totalDocuments: number
+  totalSearches: number
+  totalChats: number
+  searchesByDay: { date: string; count: number }[]
+  topSearches: { query: string; count: number }[]
+  [key: string]: any
+}
+
+interface Conversation {
+  id: string
+  title: string
+  userId: string
+  createdAt: string
+  updatedAt: string
+  [key: string]: any
+}
+
+interface Message {
+  id: string
+  conversationId: string
+  userId: string
+  content: string
+  role: "user" | "assistant"
+  createdAt: string
+  [key: string]: any
+}
+
+interface SearchResults {
+  results: SearchResult[]
+  totalResults: number
+  page: number
+  totalPages: number
+  [key: string]: any
+}
+
+interface SearchResult {
+  id: string
+  content: string
+  documentId: string
+  documentName: string
+  score: number
+  [key: string]: any
 }

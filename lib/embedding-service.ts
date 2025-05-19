@@ -11,29 +11,11 @@ import { EMBEDDING_MODEL, VECTOR_DIMENSION, validateVectorDimension } from "./em
  */
 function validateInputText(text: string): void {
   if (!text || text.trim() === "") {
-    throw new Error("Cannot generate embedding for empty or whitespace-only text")
+    throw new Error("[EmbeddingService] Cannot generate embedding for empty or whitespace-only text")
   }
 
   if (text.length < 3) {
-    throw new Error("Text is too short for meaningful embedding generation")
-  }
-}
-
-/**
- * Validates if an embedding vector is valid (not all zeros)
- */
-function validateEmbeddingVector(embedding: number[]): void {
-  if (embedding.every((v) => v === 0)) {
-    throw new Error("Invalid embedding generated: vector contains only zeros")
-  }
-
-  // Check if vector has extremely low variance (near-zero vectors)
-  const nonZeroValues = embedding.filter((v) => v !== 0)
-  if (nonZeroValues.length < embedding.length * 0.01) {
-    console.warn("Warning: Embedding vector has very few non-zero values", {
-      totalDimensions: embedding.length,
-      nonZeroDimensions: nonZeroValues.length,
-    })
+    throw new Error("[EmbeddingService] Text is too short for meaningful embedding generation")
   }
 }
 
@@ -47,7 +29,7 @@ export async function generateEmbedding(text: string): Promise<number[]> {
     // Validate input text before calling the API
     validateInputText(text)
 
-    console.log("Generating embedding for text", {
+    console.log("[EmbeddingService] Generating embedding for text", {
       textLength: text.length,
       model: EMBEDDING_MODEL,
       expectedDimension: VECTOR_DIMENSION,
@@ -64,10 +46,7 @@ export async function generateEmbedding(text: string): Promise<number[]> {
     // Validate the embedding dimension
     validateVectorDimension(embedding)
 
-    // Validate the embedding is not all zeros
-    validateEmbeddingVector(embedding)
-
-    console.log("Successfully generated embedding", {
+    console.log("[EmbeddingService] Successfully generated embedding", {
       dimensions: embedding.length,
       duration: `${duration}ms`,
       textLength: text.length,
@@ -78,7 +57,7 @@ export async function generateEmbedding(text: string): Promise<number[]> {
   } catch (error) {
     const duration = Date.now() - startTime
 
-    console.error("Error generating embedding:", {
+    console.error("[EmbeddingService] Error generating embedding:", {
       error: error instanceof Error ? error.message : "Unknown error",
       stack: error instanceof Error ? error.stack : undefined,
       textSample: text ? `${text.substring(0, 100)}...` : "undefined",
@@ -87,6 +66,110 @@ export async function generateEmbedding(text: string): Promise<number[]> {
       model: EMBEDDING_MODEL,
     })
 
-    throw new Error(`Failed to generate embedding: ${error instanceof Error ? error.message : "Unknown error"}`)
+    throw new Error(
+      `[EmbeddingService] Failed to generate embedding: ${error instanceof Error ? error.message : "Unknown error"}`,
+    )
   }
+}
+
+/**
+ * Generate embeddings for multiple texts
+ */
+export async function generateEmbeddings(
+  texts: string[],
+  documentId?: string,
+  userId?: string,
+): Promise<Array<{ text: string; embedding: number[] }>> {
+  if (!texts.length) {
+    console.warn("[EmbeddingService] No texts provided for embedding generation")
+    return []
+  }
+
+  console.log(`[EmbeddingService] Generating embeddings for ${texts.length} texts`, {
+    documentId,
+    userId,
+    model: EMBEDDING_MODEL,
+    expectedDimension: VECTOR_DIMENSION,
+  })
+
+  const startTime = Date.now()
+  const results: Array<{ text: string; embedding: number[] }> = []
+
+  // Process in batches of 20 to avoid rate limits
+  const batchSize = 20
+  for (let i = 0; i < texts.length; i += batchSize) {
+    const batch = texts.slice(i, i + batchSize)
+    const batchStartTime = Date.now()
+
+    try {
+      console.log(
+        `[EmbeddingService] Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(texts.length / batchSize)}`,
+        {
+          batchSize: batch.length,
+          documentId,
+        },
+      )
+
+      // Filter out empty texts
+      const validBatch = batch.filter((text) => text && text.trim() !== "")
+
+      if (validBatch.length === 0) {
+        console.warn("[EmbeddingService] Skipping batch with only empty texts")
+        continue
+      }
+
+      // Generate embeddings for the batch
+      const { embeddings } = await embed({
+        model: openai.embedding(EMBEDDING_MODEL),
+        values: validBatch,
+      })
+
+      // Validate and add results
+      for (let j = 0; j < validBatch.length; j++) {
+        try {
+          validateVectorDimension(embeddings[j])
+          results.push({
+            text: validBatch[j],
+            embedding: embeddings[j],
+          })
+        } catch (error) {
+          console.error(`[EmbeddingService] Error validating embedding for text at index ${i + j}:`, {
+            error: error instanceof Error ? error.message : "Unknown error",
+            textSample: validBatch[j].substring(0, 100) + "...",
+            dimensions: embeddings[j]?.length,
+            expectedDimensions: VECTOR_DIMENSION,
+          })
+          // Skip this embedding
+        }
+      }
+
+      const batchDuration = Date.now() - batchStartTime
+      console.log(`[EmbeddingService] Batch processed in ${batchDuration}ms`, {
+        batchSize: batch.length,
+        validTexts: validBatch.length,
+        embeddingsGenerated: embeddings.length,
+      })
+    } catch (error) {
+      console.error(`[EmbeddingService] Error generating embeddings for batch starting at index ${i}:`, {
+        error: error instanceof Error ? error.message : "Unknown error",
+        batchSize: batch.length,
+        documentId,
+      })
+      // Continue with next batch
+    }
+
+    // Add a small delay between batches to avoid rate limits
+    if (i + batchSize < texts.length) {
+      await new Promise((resolve) => setTimeout(resolve, 200))
+    }
+  }
+
+  const duration = Date.now() - startTime
+  console.log(`[EmbeddingService] Generated ${results.length}/${texts.length} embeddings in ${duration}ms`, {
+    documentId,
+    model: EMBEDDING_MODEL,
+    dimensions: VECTOR_DIMENSION,
+  })
+
+  return results
 }

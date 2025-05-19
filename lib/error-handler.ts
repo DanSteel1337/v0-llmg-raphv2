@@ -1,40 +1,25 @@
 /**
  * Error Handler
  *
- * Provides consistent error handling for API routes
+ * Provides error handling utilities for API routes.
  */
 
-import { NextResponse } from "next/server"
+import { type NextRequest, NextResponse } from "next/server"
 
-type ApiHandler = (req: Request) => Promise<NextResponse>
+type ApiHandler = (req: NextRequest) => Promise<NextResponse>
 
 /**
- * Higher-order function that wraps an API handler with error handling
+ * Higher-order function to wrap API handlers with error handling
  */
 export function withErrorHandling(handler: ApiHandler): ApiHandler {
-  return async (req: Request) => {
+  return async (req: NextRequest) => {
     try {
       return await handler(req)
     } catch (error) {
-      console.error("API Error:", error)
+      console.error("API error caught by withErrorHandling:", error)
 
-      // Determine if this is an OpenAI API error
-      const isOpenAIError =
-        error.message && (error.message.includes("OpenAI") || error.message.includes("prompt and messages"))
-
-      // Provide more detailed error for OpenAI issues
-      const errorMessage = isOpenAIError
-        ? `OpenAI API Error: ${error.message}. Please check your request format and API key.`
-        : error.message || "An unknown error occurred"
-
-      return NextResponse.json(
-        {
-          error: errorMessage,
-          timestamp: new Date().toISOString(),
-          path: req.url,
-        },
-        { status: 500 },
-      )
+      // Ensure we return a proper error response
+      return NextResponse.json({ error: error instanceof Error ? error.message : "Unknown error" }, { status: 500 })
     }
   }
 }

@@ -1,101 +1,74 @@
 /**
  * API Utilities
  *
- * Provides standardized utilities for API response handling, error management,
- * and request validation. These utilities ensure consistent API behavior
- * across all endpoints.
- *
- * Dependencies:
- * - next/server for NextResponse
- * - @/types for API response types
+ * Common utilities for API routes.
  */
 
 import { NextResponse } from "next/server"
-import type { ApiError, ApiSuccess } from "@/types"
 
 /**
- * Creates a standardized error response
- * @param message Error message
- * @param status HTTP status code
- * @param details Additional error details
- * @param code Error code for client-side handling
+ * Handle API request with consistent response format
  */
-export function createErrorResponse(
-  message: string,
-  status = 500,
-  details?: unknown,
-  code?: string,
-): NextResponse<ApiError> {
-  console.error(`API Error (${status}): ${message}`, details)
-
-  return NextResponse.json(
-    {
-      error: message,
-      ...(details && { details }),
-      ...(code && { code }),
-    },
-    { status },
-  )
-}
-
-/**
- * Creates a standardized success response
- * @param data Response data
- * @param status HTTP status code
- */
-export function createSuccessResponse<T>(data: T, status = 200): NextResponse<ApiSuccess<T>> {
-  return NextResponse.json(
-    {
-      success: true,
-      data,
-    },
-    { status },
-  )
-}
-
-/**
- * Handles API requests with consistent error handling
- * @param requestHandler Async function that handles the request
- */
-export async function handleApiRequest<T>(
-  requestHandler: () => Promise<T>,
-): Promise<NextResponse<ApiSuccess<T> | ApiError>> {
+export async function handleApiRequest<T>(handler: () => Promise<T>): Promise<NextResponse> {
   try {
-    const result = await requestHandler()
-    return createSuccessResponse(result)
+    const result = await handler()
+
+    // Ensure we always return a valid JSON object
+    if (result === undefined || result === null) {
+      return NextResponse.json({ success: true, data: {} })
+    }
+
+    return NextResponse.json(result)
   } catch (error) {
-    const message = error instanceof Error ? error.message : "An unexpected error occurred"
-    const code = error instanceof Error && "code" in error ? (error as any).code : undefined
-    return createErrorResponse(message, 500, undefined, code)
+    console.error("API error:", error)
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Unknown error" }, { status: 400 })
   }
 }
 
 /**
- * Validates required fields in a request body
- * @param body Request body
- * @param requiredFields Array of required field names
- * @throws Error if any required field is missing
+ * Validate required fields in request body
  */
-export function validateRequiredFields(body: Record<string, any>, requiredFields: string[]): void {
-  const missingFields = requiredFields.filter((field) => body[field] === undefined)
-
+export function validateRequiredFields(body: any, fields: string[]): void {
+  const missingFields = fields.filter((field) => !body[field])
   if (missingFields.length > 0) {
     throw new Error(`Missing required fields: ${missingFields.join(", ")}`)
   }
 }
 
 /**
- * Extracts and validates a user ID from request parameters
- * @param request Next.js request object
- * @throws Error if user ID is missing
+ * Extract user ID from request headers or query parameters
  */
 export function extractUserId(request: Request): string {
-  const { searchParams } = new URL(request.url)
-  const userId = searchParams.get("userId")
+  // Try to get from URL
+  const url = new URL(request.url)
+  const userId = url.searchParams.get("userId")
 
-  if (!userId) {
-    throw new Error("User ID is required")
+  if (userId) {
+    return userId
   }
 
-  return userId
+  // Try to get from headers
+  const authHeader = request.headers.get("Authorization")
+  if (authHeader) {
+    // Extract user ID from token or other auth mechanism
+    // This is a placeholder - implement actual extraction logic
+    return "user-from-auth-header"
+  }
+
+  throw new Error("User ID not found in request")
+}
+
+/**
+ * Create a standardized success response
+ */
+export function createSuccessResponse<T>(data: T, status = 200): NextResponse {
+  return NextResponse.json({ success: true, data: data || {} }, { status })
+}
+
+/**
+ * Create a standardized error response
+ */
+export function createErrorResponse(error: Error | string, status = 400): NextResponse {
+  const message = typeof error === "string" ? error : error.message
+  return NextResponse.json({ success: false, error: message }, { status })
 }

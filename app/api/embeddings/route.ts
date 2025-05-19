@@ -22,14 +22,14 @@ export const POST = withErrorHandling(async (request: NextRequest) => {
       const { text } = await request.json()
 
       if (!text) {
-        throw new Error("Text is required")
+        throw new Error("[EmbeddingsAPI] Text is required")
       }
 
       if (text.trim() === "") {
-        throw new Error("Cannot generate embedding for empty or whitespace-only text")
+        throw new Error("[EmbeddingsAPI] Cannot generate embedding for empty or whitespace-only text")
       }
 
-      console.log(`POST /api/embeddings - Generating embedding`, {
+      console.log(`[EmbeddingsAPI] Generating embedding`, {
         textLength: text.length,
         model: EMBEDDING_MODEL,
         expectedDimension: VECTOR_DIMENSION,
@@ -37,16 +37,23 @@ export const POST = withErrorHandling(async (request: NextRequest) => {
 
       const embedding = await generateEmbedding(text)
 
+      // Double-check that embedding dimensions match expected
+      if (embedding.length !== VECTOR_DIMENSION) {
+        throw new Error(
+          `[EmbeddingsAPI] Embedding dimension mismatch: Expected ${VECTOR_DIMENSION}, got ${embedding.length}`,
+        )
+      }
+
       // Double-check that embedding is not all zeros
       if (embedding.every((v) => v === 0)) {
-        console.error("POST /api/embeddings - Generated an all-zero embedding", {
+        console.error("[EmbeddingsAPI] Generated an all-zero embedding", {
           textSample: text.substring(0, 100) + "...",
           textLength: text.length,
         })
-        throw new Error("Invalid embedding generated: vector contains only zeros")
+        throw new Error("[EmbeddingsAPI] Invalid embedding generated: vector contains only zeros")
       }
 
-      console.log(`POST /api/embeddings - Successfully generated embedding`, {
+      console.log(`[EmbeddingsAPI] Successfully generated embedding`, {
         dimensions: embedding.length,
       })
 
@@ -56,7 +63,7 @@ export const POST = withErrorHandling(async (request: NextRequest) => {
         dimensions: embedding.length,
       }
     } catch (error) {
-      console.error("POST /api/embeddings - Error generating embedding", {
+      console.error("[EmbeddingsAPI] Error generating embedding", {
         error: error instanceof Error ? error.message : "Unknown error",
         stack: error instanceof Error ? error.stack : undefined,
       })
