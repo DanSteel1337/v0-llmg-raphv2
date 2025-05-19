@@ -1,7 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  serverExternalPackages: ["@pinecone-database/pinecone", "@supabase/supabase-js"],
   eslint: {
     ignoreDuringBuilds: true,
   },
@@ -11,6 +10,7 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  serverExternalPackages: ["@pinecone-database/pinecone", "@supabase/supabase-js"],
 }
 
 module.exports = nextConfig

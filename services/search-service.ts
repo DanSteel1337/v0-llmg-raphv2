@@ -230,16 +230,3 @@ function generateHighlights(content: string): string[] {
 
   return highlights
 }
-
-/**
- * Saves a search query to history
- */
-export async function saveSearchToHistory(userId: string, query: string, results: SearchResult[]): Promise<void> {
-  try {
-    // In a real implementation, you would save the search history to a database
-    console.log(`Saving search history for user ${userId}: ${query}`)
-  } catch (error) {
-    console.error("Error saving search history:", error)
-    // Non-critical error, don't throw
-  }
-}
