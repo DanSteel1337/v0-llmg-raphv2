@@ -64,7 +64,15 @@ export function DocumentWidget({ userId, limit = 5 }: DocumentWidgetProps) {
     try {
       setIsUploading(true)
       setErrorMessage(null)
-      await uploadDocument(file)
+
+      const document = await uploadDocument(file)
+
+      // Add validation here
+      console.log("Document widget upload response:", document)
+      if (!document?.id) {
+        throw new Error("Document upload failed: Missing document ID in response")
+      }
+
       addToast("Document uploaded successfully", "success")
     } catch (error) {
       console.error("Upload error:", error)

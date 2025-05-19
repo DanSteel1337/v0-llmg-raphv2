@@ -67,6 +67,12 @@ export async function uploadDocument(
     }),
   })
 
+  // Add this validation and logging right after the above code
+  console.log("Document creation response:", document)
+  if (!document?.id) {
+    throw new Error("Document upload failed: Missing document ID in response")
+  }
+
   // Then, upload the file
   const formData = new FormData()
   formData.append("file", file)

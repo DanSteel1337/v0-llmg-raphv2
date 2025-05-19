@@ -37,6 +37,12 @@ export function useDocuments(userId: string) {
     try {
       const document = await uploadDocument(userId, file)
 
+      // Add validation here
+      console.log("Upload document response:", document)
+      if (!document?.id) {
+        throw new Error("Document upload failed: Missing document ID in response")
+      }
+
       // Refresh documents list
       await fetchDocumentsData()
 
