@@ -121,3 +121,21 @@ export interface AnalyticsData {
     count: number
   }[]
 }
+
+// Chat message type
+export interface Message {
+  id: string
+  conversation_id: string
+  role: "user" | "assistant"
+  content: string
+  created_at: string
+}
+
+// Chat context type
+export interface ChatContext {
+  content: string
+  document_name: string
+  section?: string
+}
+
+export type Role = "user" | "assistant" | "system"

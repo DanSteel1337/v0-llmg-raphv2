@@ -9,14 +9,13 @@
  *
  * Dependencies:
  * - @/lib/pinecone-client.ts for vector storage and retrieval
- * - @ai-sdk/openai for embeddings
+ * - @/lib/embedding-service.ts for embeddings
  * - uuid for ID generation
  */
 
-import { openai } from "@ai-sdk/openai"
-import { embed } from "ai"
 import { v4 as uuidv4 } from "uuid"
 import { getPineconeIndex } from "@/lib/pinecone-client"
+import { generateEmbedding } from "@/lib/embedding-service"
 import type { SearchOptions, SearchResult } from "@/types"
 
 // Constants
@@ -81,10 +80,7 @@ export async function logSearchQuery(
 async function semanticSearch(query: string, userId: string, options: SearchOptions): Promise<SearchResult[]> {
   try {
     // Generate embedding for the query
-    const { embedding } = await embed({
-      model: openai.embedding("text-embedding-3-small"),
-      value: query,
-    })
+    const embedding = await generateEmbedding(query)
 
     // Build filter based on document types if provided
     const filter: any = {
@@ -233,4 +229,17 @@ function generateHighlights(content: string): string[] {
   }
 
   return highlights
+}
+
+/**
+ * Saves a search query to history
+ */
+export async function saveSearchToHistory(userId: string, query: string, results: SearchResult[]): Promise<void> {
+  try {
+    // In a real implementation, you would save the search history to a database
+    console.log(`Saving search history for user ${userId}: ${query}`)
+  } catch (error) {
+    console.error("Error saving search history:", error)
+    // Non-critical error, don't throw
+  }
 }

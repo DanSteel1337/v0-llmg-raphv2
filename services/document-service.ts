@@ -10,15 +10,14 @@
  * Dependencies:
  * - @/lib/pinecone-client.ts for vector storage
  * - @/lib/supabase-client.ts for file storage
- * - @ai-sdk/openai for embeddings
+ * - @/lib/embedding-service.ts for embeddings
  * - uuid for ID generation
  */
 
 import { v4 as uuidv4 } from "uuid"
 import { getPineconeIndex } from "@/lib/pinecone-client"
 import { getSupabaseBrowserClient } from "@/lib/supabase-client"
-import { openai } from "@ai-sdk/openai"
-import { embed } from "ai"
+import { generateEmbedding } from "@/lib/embedding-service"
 import type { Document, DocumentChunk, ProcessDocumentOptions } from "@/types"
 
 // Constants
@@ -551,10 +550,7 @@ async function embedAndStoreChunks(chunks: DocumentChunk[]): Promise<void> {
     // Generate embeddings for this batch
     const embeddingPromises = batch.map(async (chunk) => {
       try {
-        const { embedding } = await embed({
-          model: openai.embedding("text-embedding-3-small"),
-          value: chunk.content,
-        })
+        const embedding = await generateEmbedding(chunk.content)
 
         return {
           id: chunk.id,

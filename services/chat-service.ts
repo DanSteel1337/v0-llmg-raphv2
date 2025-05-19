@@ -1,36 +1,34 @@
 /**
  * Chat Service
  *
- * Handles chat functionality including:
+ * Handles chat operations including:
+ * - Message generation
  * - Conversation management
- * - Message generation with RAG
- * - Context retrieval from vector store
- * - Chat history storage
+ * - Context retrieval
  *
  * Dependencies:
- * - @/lib/pinecone-client.ts for vector storage and retrieval
- * - @ai-sdk/openai for LLM integration
- * - uuid for ID generation
+ * - @/lib/pinecone-client.ts for vector storage
+ * - @/lib/embedding-service.ts for embeddings
+ * - ai for text generation
+ * - @ai-sdk/openai for OpenAI models
  */
 
-import { openai } from "@ai-sdk/openai"
-import { embed, streamText } from "ai"
 import { v4 as uuidv4 } from "uuid"
 import { getPineconeIndex } from "@/lib/pinecone-client"
-import type { ChatMessage, Conversation, CreateMessageOptions } from "@/types"
+import { generateEmbedding } from "@/lib/embedding-service"
+import { generateText } from "ai"
+import { openai } from "@ai-sdk/openai"
+import type { Message, Conversation, ChatContext } from "@/types"
 
 // Constants
-const VECTOR_DIMENSION = 1536
-const DEFAULT_TOP_K = 5
-const MAX_HISTORY_MESSAGES = 10
-const SYSTEM_PROMPT = `You are a helpful assistant that answers questions based on the provided context. 
-If the answer is not in the context, say that you don't know. 
-Always cite your sources using [Document: Title] format at the end of relevant sentences.`
+const MAX_CONTEXT_CHUNKS = 5
+const MAX_CONVERSATIONS = 50
+const MAX_MESSAGES_PER_CONVERSATION = 100
 
 /**
  * Creates a new conversation
  */
-export async function createConversation(userId: string, title?: string): Promise<Conversation> {
+export async function createConversation(userId: string, title: string): Promise<Conversation> {
   const pineconeIndex = await getPineconeIndex()
   const conversationId = uuidv4()
   const now = new Date().toISOString()
@@ -38,7 +36,7 @@ export async function createConversation(userId: string, title?: string): Promis
   const conversation: Conversation = {
     id: conversationId,
     user_id: userId,
-    title: title || "New Conversation",
+    title,
     created_at: now,
     updated_at: now,
     message_count: 0,
@@ -49,7 +47,7 @@ export async function createConversation(userId: string, title?: string): Promis
       vectors: [
         {
           id: conversationId,
-          values: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector
+          values: new Array(1536).fill(0), // Placeholder vector
           metadata: {
             ...conversation,
             record_type: "conversation",
@@ -71,8 +69,8 @@ export async function getConversationsByUserId(userId: string): Promise<Conversa
 
   const queryResponse = await pineconeIndex.query({
     queryRequest: {
-      vector: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector for metadata-only query
-      topK: 100,
+      vector: new Array(1536).fill(0), // Placeholder vector for metadata-only query
+      topK: MAX_CONVERSATIONS,
       includeMetadata: true,
       filter: {
         user_id: { $eq: userId },
@@ -84,12 +82,12 @@ export async function getConversationsByUserId(userId: string): Promise<Conversa
 
   return (queryResponse.matches || []).map((match) => ({
     id: match.id,
-    user_id: match.metadata?.user_id as string,
-    title: match.metadata?.title as string,
-    created_at: match.metadata?.created_at as string,
-    updated_at: match.metadata?.updated_at as string,
-    message_count: match.metadata?.message_count as number,
-  }))
+    user_id: match.metadata?.user_id || "",
+    title: match.metadata?.title || "Untitled",
+    created_at: match.metadata?.created_at || new Date().toISOString(),
+    updated_at: match.metadata?.updated_at || new Date().toISOString(),
+    message_count: match.metadata?.message_count || 0,
+  })) as Conversation[]
 }
 
 /**
@@ -100,7 +98,7 @@ export async function getConversationById(id: string): Promise<Conversation | nu
 
   const queryResponse = await pineconeIndex.query({
     queryRequest: {
-      vector: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector for metadata-only query
+      vector: new Array(1536).fill(0), // Placeholder vector for metadata-only query
       topK: 1,
       includeMetadata: true,
       filter: {
@@ -119,50 +117,12 @@ export async function getConversationById(id: string): Promise<Conversation | nu
 
   return {
     id: match.id,
-    user_id: match.metadata?.user_id as string,
-    title: match.metadata?.title as string,
-    created_at: match.metadata?.created_at as string,
-    updated_at: match.metadata?.updated_at as string,
-    message_count: match.metadata?.message_count as number,
-  }
-}
-
-/**
- * Updates a conversation's title
- */
-export async function updateConversationTitle(id: string, title: string): Promise<Conversation> {
-  const pineconeIndex = await getPineconeIndex()
-
-  // Get current conversation
-  const conversation = await getConversationById(id)
-
-  if (!conversation) {
-    throw new Error("Conversation not found")
-  }
-
-  const updatedConversation = {
-    ...conversation,
-    title,
-    updated_at: new Date().toISOString(),
-  }
-
-  await pineconeIndex.upsert({
-    upsertRequest: {
-      vectors: [
-        {
-          id,
-          values: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector
-          metadata: {
-            ...updatedConversation,
-            record_type: "conversation",
-          },
-        },
-      ],
-      namespace: "",
-    },
-  })
-
-  return updatedConversation
+    user_id: match.metadata?.user_id || "",
+    title: match.metadata?.title || "Untitled",
+    created_at: match.metadata?.created_at || new Date().toISOString(),
+    updated_at: match.metadata?.updated_at || new Date().toISOString(),
+    message_count: match.metadata?.message_count || 0,
+  } as Conversation
 }
 
 /**
@@ -182,8 +142,8 @@ export async function deleteConversation(id: string): Promise<void> {
   // Find all messages for this conversation
   const queryResponse = await pineconeIndex.query({
     queryRequest: {
-      vector: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector for metadata-only query
-      topK: 1000,
+      vector: new Array(1536).fill(0), // Placeholder vector for metadata-only query
+      topK: MAX_MESSAGES_PER_CONVERSATION,
       includeMetadata: true,
       filter: {
         conversation_id: { $eq: id },
@@ -208,13 +168,13 @@ export async function deleteConversation(id: string): Promise<void> {
 /**
  * Gets all messages for a conversation
  */
-export async function getMessagesByConversationId(conversationId: string): Promise<ChatMessage[]> {
+export async function getMessagesByConversationId(conversationId: string): Promise<Message[]> {
   const pineconeIndex = await getPineconeIndex()
 
   const queryResponse = await pineconeIndex.query({
     queryRequest: {
-      vector: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector for metadata-only query
-      topK: 100,
+      vector: new Array(1536).fill(0), // Placeholder vector for metadata-only query
+      topK: MAX_MESSAGES_PER_CONVERSATION,
       includeMetadata: true,
       filter: {
         conversation_id: { $eq: conversationId },
@@ -226,12 +186,11 @@ export async function getMessagesByConversationId(conversationId: string): Promi
 
   const messages = (queryResponse.matches || []).map((match) => ({
     id: match.id,
-    conversation_id: match.metadata?.conversation_id as string,
-    role: match.metadata?.role as "user" | "assistant" | "system",
-    content: match.metadata?.content as string,
-    created_at: match.metadata?.created_at as string,
-    sources: match.metadata?.sources as string[] | undefined,
-  }))
+    conversation_id: match.metadata?.conversation_id || "",
+    role: match.metadata?.role || "user",
+    content: match.metadata?.content || "",
+    created_at: match.metadata?.created_at || new Date().toISOString(),
+  })) as Message[]
 
   // Sort messages by creation time
   return messages.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
@@ -240,32 +199,26 @@ export async function getMessagesByConversationId(conversationId: string): Promi
 /**
  * Creates a new message in a conversation
  */
-export async function createMessage({
-  conversationId,
-  role,
-  content,
-  sources,
-}: CreateMessageOptions): Promise<ChatMessage> {
+export async function createMessage(
+  conversationId: string,
+  role: "user" | "assistant",
+  content: string,
+): Promise<Message> {
   const pineconeIndex = await getPineconeIndex()
   const messageId = uuidv4()
   const now = new Date().toISOString()
 
-  const message: ChatMessage = {
+  // Generate embedding for the message content
+  const embedding = await generateEmbedding(content)
+
+  const message: Message = {
     id: messageId,
     conversation_id: conversationId,
     role,
     content,
     created_at: now,
-    sources,
   }
 
-  // Generate embedding for the message content
-  const { embedding } = await embed({
-    model: openai.embedding("text-embedding-3-small"),
-    value: content,
-  })
-
-  // Store message with embedding
   await pineconeIndex.upsert({
     upsertRequest: {
       vectors: [
@@ -282,7 +235,7 @@ export async function createMessage({
     },
   })
 
-  // Update conversation message count and updated_at
+  // Update conversation message count and last updated
   const conversation = await getConversationById(conversationId)
   if (conversation) {
     await pineconeIndex.upsert({
@@ -290,7 +243,7 @@ export async function createMessage({
         vectors: [
           {
             id: conversationId,
-            values: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector
+            values: new Array(1536).fill(0), // Placeholder vector
             metadata: {
               ...conversation,
               message_count: conversation.message_count + 1,
@@ -308,70 +261,27 @@ export async function createMessage({
 }
 
 /**
- * Generates a response to a user message using RAG
+ * Generates a response to a user message
  */
-export async function generateResponse(
-  conversationId: string,
-  userMessage: string,
-  userId: string,
-  onChunk?: (chunk: string) => void,
-): Promise<ChatMessage> {
+export async function generateResponse(userId: string, conversationId: string, userMessage: string): Promise<Message> {
   try {
-    // 1. Retrieve relevant context from vector store
-    const context = await retrieveRelevantContext(userMessage, userId)
+    // 1. Retrieve relevant context from documents
+    const context = await retrieveContext(userId, userMessage)
 
     // 2. Get conversation history
-    const history = await getMessagesByConversationId(conversationId)
-    const recentHistory = history.slice(-MAX_HISTORY_MESSAGES).map((msg) => ({ role: msg.role, content: msg.content }))
+    const messages = await getMessagesByConversationId(conversationId)
 
-    // 3. Create system message with context
-    const systemMessage = `${SYSTEM_PROMPT}\n\nContext:\n${context.map((item) => `${item.content} [Document: ${item.documentName}]`).join("\n\n")}`
+    // 3. Build prompt with context and history
+    const prompt = buildPrompt(userMessage, messages, context)
 
     // 4. Generate response
-    let responseContent = ""
-    const sources: string[] = []
-
-    // Extract unique document names from context
-    context.forEach((item) => {
-      if (!sources.includes(item.documentName)) {
-        sources.push(item.documentName)
-      }
+    const { text } = await generateText({
+      model: openai("gpt-4"),
+      prompt,
     })
 
-    // Stream the response
-    const result = streamText({
-      model: openai("gpt-4o"),
-      system: systemMessage,
-      prompt: userMessage,
-      messages: recentHistory,
-      onChunk: ({ chunk }) => {
-        if (chunk.type === "text-delta") {
-          responseContent += chunk.text
-          if (onChunk) {
-            onChunk(chunk.text)
-          }
-        }
-      },
-    })
-
-    await result.text
-
-    // 5. Save user message
-    await createMessage({
-      conversationId,
-      role: "user",
-      content: userMessage,
-    })
-
-    // 6. Save assistant response
-    const assistantMessage = await createMessage({
-      conversationId,
-      role: "assistant",
-      content: responseContent,
-      sources,
-    })
-
-    return assistantMessage
+    // 5. Save assistant message
+    return await createMessage(conversationId, "assistant", text)
   } catch (error) {
     console.error("Error generating response:", error)
     throw error
@@ -379,22 +289,19 @@ export async function generateResponse(
 }
 
 /**
- * Retrieves relevant context for a query from the vector store
+ * Retrieves relevant context from documents based on the query
  */
-async function retrieveRelevantContext(query: string, userId: string) {
+async function retrieveContext(userId: string, query: string): Promise<ChatContext[]> {
   try {
     // Generate embedding for the query
-    const { embedding } = await embed({
-      model: openai.embedding("text-embedding-3-small"),
-      value: query,
-    })
+    const embedding = await generateEmbedding(query)
 
     // Query Pinecone for relevant chunks
     const pineconeIndex = await getPineconeIndex()
     const queryResponse = await pineconeIndex.query({
       queryRequest: {
         vector: embedding,
-        topK: DEFAULT_TOP_K,
+        topK: MAX_CONTEXT_CHUNKS,
         includeMetadata: true,
         filter: {
           user_id: { $eq: userId },
@@ -406,12 +313,42 @@ async function retrieveRelevantContext(query: string, userId: string) {
 
     // Format results
     return (queryResponse.matches || []).map((match) => ({
-      content: match.metadata?.content as string,
-      documentName: match.metadata?.document_name as string,
-      score: match.score,
+      content: match.metadata?.content || "",
+      document_name: match.metadata?.document_name || "",
+      section: match.metadata?.section || "",
     }))
   } catch (error) {
     console.error("Error retrieving context:", error)
-    throw error
+    return [] // Return empty context on error
   }
+}
+
+/**
+ * Builds a prompt for the AI model
+ */
+function buildPrompt(userMessage: string, conversationHistory: Message[], context: ChatContext[]): string {
+  // Include relevant context
+  let contextText = ""
+  if (context.length > 0) {
+    contextText = "Here is some relevant information from your documents:\n\n"
+    context.forEach((ctx, i) => {
+      contextText += `[Document: ${ctx.document_name}${ctx.section ? `, Section: ${ctx.section}` : ""}]\n${ctx.content}\n\n`
+    })
+  }
+
+  // Include conversation history (last few messages)
+  const recentMessages = conversationHistory.slice(-6) // Last 6 messages (3 exchanges)
+  let historyText = ""
+  if (recentMessages.length > 0) {
+    historyText = "Here is our conversation so far:\n\n"
+    recentMessages.forEach((msg) => {
+      historyText += `${msg.role === "user" ? "User" : "Assistant"}: ${msg.content}\n\n`
+    })
+  }
+
+  // Build the final prompt
+  return `You are a helpful AI assistant that answers questions based on the user's documents.
+${contextText}
+${historyText}
+User: ${userMessage}`
 }
