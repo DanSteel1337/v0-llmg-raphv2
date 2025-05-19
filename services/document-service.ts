@@ -335,13 +335,16 @@ async function extractTextFromDocument(fileUrl: string, fileType: string): Promi
     let text = ""
 
     switch (fileType.toLowerCase()) {
+      case "text/plain":
       case "txt":
         text = await data.text()
         break
+      case "application/pdf":
       case "pdf":
         // In a real implementation, you would use a PDF parsing library
         text = await simulatePdfExtraction(data)
         break
+      case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
       case "docx":
         // In a real implementation, you would use a DOCX parsing library
         text = await simulateDocxExtraction(data)

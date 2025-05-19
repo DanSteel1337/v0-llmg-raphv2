@@ -18,7 +18,7 @@ import { v4 as uuidv4 } from "uuid"
 import { getPineconeIndex } from "@/lib/pinecone-client"
 import { generateEmbedding } from "@/lib/embedding-service"
 import { openai } from "@ai-sdk/openai"
-import { streamText } from "ai"
+import { generateText } from "ai"
 import type { ChatMessage, Conversation, CreateMessageOptions } from "@/types"
 
 // Constants
@@ -313,7 +313,6 @@ export async function generateResponse(
   conversationId: string,
   userMessage: string,
   userId: string,
-  onChunk?: (chunk: string) => void,
 ): Promise<ChatMessage> {
   try {
     // 1. Retrieve relevant context from vector store
@@ -327,33 +326,20 @@ export async function generateResponse(
     const systemMessage = `${SYSTEM_PROMPT}\n\nContext:\n${context.map((item) => `${item.content} [Document: ${item.documentName}]`).join("\n\n")}`
 
     // 4. Generate response
-    let responseContent = ""
-    const sources: string[] = []
+    const { text: responseContent } = await generateText({
+      model: openai("gpt-4o"),
+      system: systemMessage,
+      prompt: userMessage,
+      messages: recentHistory,
+    })
 
     // Extract unique document names from context
+    const sources: string[] = []
     context.forEach((item) => {
       if (!sources.includes(item.documentName)) {
         sources.push(item.documentName)
       }
     })
-
-    // Stream the response
-    const result = streamText({
-      model: openai("gpt-4o"),
-      system: systemMessage,
-      prompt: userMessage,
-      messages: recentHistory,
-      onChunk: ({ chunk }) => {
-        if (chunk.type === "text-delta") {
-          responseContent += chunk.text
-          if (onChunk) {
-            onChunk(chunk.text)
-          }
-        }
-      },
-    })
-
-    await result.text
 
     // 5. Save user message
     await createMessage({
