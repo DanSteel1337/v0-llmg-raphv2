@@ -17,10 +17,10 @@ import { v4 as uuidv4 } from "uuid"
 import { upsertVectors, queryVectors, deleteVectors } from "@/lib/pinecone-rest-client"
 import { generateEmbedding } from "@/lib/embedding-service"
 import { chunkDocument } from "@/lib/chunking-utils"
+import { VECTOR_DIMENSION } from "@/lib/embedding-config"
 import type { Document, ProcessDocumentOptions } from "@/types"
 
 // Constants
-const VECTOR_DIMENSION = 1536
 const MAX_CHUNK_SIZE = 1000
 
 /**
@@ -52,10 +52,13 @@ export async function createDocument(
     updated_at: now,
   }
 
+  // Create a zero vector with the correct dimension
+  const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+
   await upsertVectors([
     {
       id: documentId,
-      values: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector
+      values: zeroVector, // Zero vector with correct dimension
       metadata: {
         ...document,
         record_type: "document",
@@ -70,8 +73,11 @@ export async function createDocument(
  * Gets all documents for a user
  */
 export async function getDocumentsByUserId(userId: string): Promise<Document[]> {
+  // Create a zero vector with the correct dimension
+  const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+
   const response = await queryVectors(
-    new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector for metadata-only query
+    zeroVector, // Zero vector with correct dimension
     100,
     true,
     {
@@ -106,8 +112,11 @@ export async function getDocumentsByUserId(userId: string): Promise<Document[]> 
  * Gets a document by ID
  */
 export async function getDocumentById(id: string): Promise<Document | null> {
+  // Create a zero vector with the correct dimension
+  const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+
   const response = await queryVectors(
-    new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector for metadata-only query
+    zeroVector, // Zero vector with correct dimension
     1,
     true,
     {
@@ -168,10 +177,13 @@ export async function updateDocumentStatus(
     updated_at: new Date().toISOString(),
   }
 
+  // Create a zero vector with the correct dimension
+  const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+
   await upsertVectors([
     {
       id: documentId,
-      values: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector
+      values: zeroVector, // Zero vector with correct dimension
       metadata: {
         ...updatedDocument,
         record_type: "document",
@@ -189,9 +201,12 @@ export async function deleteDocument(id: string): Promise<void> {
   // Delete the document
   await deleteVectors([id])
 
+  // Create a zero vector with the correct dimension
+  const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+
   // Find all chunks for this document
   const response = await queryVectors(
-    new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector for metadata-only query
+    zeroVector, // Zero vector with correct dimension
     1000,
     true,
     {

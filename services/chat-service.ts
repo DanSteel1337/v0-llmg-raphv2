@@ -17,12 +17,12 @@
 import { v4 as uuidv4 } from "uuid"
 import { upsertVectors, queryVectors, deleteVectors } from "@/lib/pinecone-rest-client"
 import { generateEmbedding } from "@/lib/embedding-service"
+import { VECTOR_DIMENSION } from "@/lib/embedding-config"
 import { openai } from "@ai-sdk/openai"
 import { generateText } from "ai"
 import type { ChatMessage, Conversation, CreateMessageOptions } from "@/types"
 
 // Constants
-const VECTOR_DIMENSION = 1536
 const DEFAULT_TOP_K = 5
 const MAX_HISTORY_MESSAGES = 10
 const SYSTEM_PROMPT = `You are a helpful assistant that answers questions based on the provided context. 
@@ -45,10 +45,13 @@ export async function createConversation(userId: string, title?: string): Promis
     message_count: 0,
   }
 
+  // Create a zero vector with the correct dimension
+  const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+
   await upsertVectors([
     {
       id: conversationId,
-      values: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector
+      values: zeroVector, // Zero vector with correct dimension
       metadata: {
         ...conversation,
         record_type: "conversation",
@@ -63,8 +66,11 @@ export async function createConversation(userId: string, title?: string): Promis
  * Gets all conversations for a user
  */
 export async function getConversationsByUserId(userId: string): Promise<Conversation[]> {
+  // Create a zero vector with the correct dimension
+  const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+
   const response = await queryVectors(
-    new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector for metadata-only query
+    zeroVector, // Zero vector with correct dimension
     100,
     true,
     {
@@ -93,8 +99,11 @@ export async function getConversationsByUserId(userId: string): Promise<Conversa
  * Gets a conversation by ID
  */
 export async function getConversationById(id: string): Promise<Conversation | null> {
+  // Create a zero vector with the correct dimension
+  const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+
   const response = await queryVectors(
-    new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector for metadata-only query
+    zeroVector, // Zero vector with correct dimension
     1,
     true,
     {
@@ -142,10 +151,13 @@ export async function updateConversationTitle(id: string, title: string): Promis
     updated_at: new Date().toISOString(),
   }
 
+  // Create a zero vector with the correct dimension
+  const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+
   await upsertVectors([
     {
       id,
-      values: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector
+      values: zeroVector, // Zero vector with correct dimension
       metadata: {
         ...updatedConversation,
         record_type: "conversation",
@@ -163,9 +175,12 @@ export async function deleteConversation(id: string): Promise<void> {
   // Delete the conversation
   await deleteVectors([id])
 
+  // Create a zero vector with the correct dimension
+  const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+
   // Find all messages for this conversation
   const response = await queryVectors(
-    new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector for metadata-only query
+    zeroVector, // Zero vector with correct dimension
     1000,
     true,
     {
@@ -185,8 +200,11 @@ export async function deleteConversation(id: string): Promise<void> {
  * Gets all messages for a conversation
  */
 export async function getMessagesByConversationId(conversationId: string): Promise<ChatMessage[]> {
+  // Create a zero vector with the correct dimension
+  const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+
   const response = await queryVectors(
-    new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector for metadata-only query
+    zeroVector, // Zero vector with correct dimension
     100,
     true,
     {
@@ -253,10 +271,13 @@ export async function createMessage({
   // Update conversation message count and updated_at
   const conversation = await getConversationById(conversationId)
   if (conversation) {
+    // Create a zero vector with the correct dimension
+    const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+
     await upsertVectors([
       {
         id: conversationId,
-        values: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector
+        values: zeroVector, // Zero vector with correct dimension
         metadata: {
           ...conversation,
           message_count: conversation.message_count + 1,

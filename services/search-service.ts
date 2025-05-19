@@ -16,10 +16,10 @@
 import { v4 as uuidv4 } from "uuid"
 import { upsertVectors, queryVectors } from "@/lib/pinecone-rest-client"
 import { generateEmbedding } from "@/lib/embedding-service"
+import { VECTOR_DIMENSION } from "@/lib/embedding-config"
 import type { SearchOptions, SearchResult } from "@/types"
 
 // Constants
-const VECTOR_DIMENSION = 1536
 const DEFAULT_TOP_K = 10
 const MAX_KEYWORD_RESULTS = 100
 
@@ -80,10 +80,13 @@ export async function logSearchQuery(
   filters: Record<string, any>,
 ): Promise<void> {
   try {
+    // Create a zero vector with the correct dimension
+    const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+
     await upsertVectors([
       {
         id: uuidv4(),
-        values: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector
+        values: zeroVector, // Zero vector with correct dimension
         metadata: {
           user_id: userId,
           query,
@@ -183,6 +186,9 @@ async function keywordSearch(query: string, userId: string, options: SearchOptio
       }
     }
 
+    // Create a zero vector with the correct dimension
+    const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+
     // Get all chunks for this user with the applied filters
     console.log("Querying Pinecone for keyword search", {
       maxResults: MAX_KEYWORD_RESULTS,
@@ -190,7 +196,7 @@ async function keywordSearch(query: string, userId: string, options: SearchOptio
     })
 
     const response = await queryVectors(
-      new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector
+      zeroVector, // Zero vector with correct dimension
       MAX_KEYWORD_RESULTS,
       true,
       filter,

@@ -5,6 +5,8 @@
  * This ensures full compatibility with Edge runtime.
  */
 
+import { validateVectorDimension } from "./embedding-config"
+
 // Environment variables with validation
 const apiKey = process.env.PINECONE_API_KEY
 if (!apiKey) {
@@ -30,6 +32,13 @@ export async function upsertVectors(vectors: any[], namespace = "") {
 
     if (!host) {
       throw new Error("PINECONE_HOST is not defined")
+    }
+
+    // Validate all vector dimensions before sending to Pinecone
+    for (const vector of vectors) {
+      if (vector.values && Array.isArray(vector.values)) {
+        validateVectorDimension(vector.values)
+      }
     }
 
     const response = await fetch(`${host}/vectors/upsert`, {
@@ -84,6 +93,9 @@ export async function queryVectors(
     if (!host) {
       throw new Error("PINECONE_HOST is not defined")
     }
+
+    // Validate query vector dimension
+    validateVectorDimension(vector)
 
     const queryBody: any = {
       vector,
