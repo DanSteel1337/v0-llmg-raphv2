@@ -31,7 +31,7 @@ Always cite your sources using [Document: Title] format at the end of relevant s
  * Creates a new conversation
  */
 export async function createConversation(userId: string, title?: string): Promise<Conversation> {
-  const pineconeIndex = getPineconeIndex()
+  const pineconeIndex = await getPineconeIndex()
   const conversationId = uuidv4()
   const now = new Date().toISOString()
 
@@ -44,16 +44,21 @@ export async function createConversation(userId: string, title?: string): Promis
     message_count: 0,
   }
 
-  await pineconeIndex.upsert([
-    {
-      id: conversationId,
-      values: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector
-      metadata: {
-        ...conversation,
-        record_type: "conversation",
-      },
+  await pineconeIndex.upsert({
+    upsertRequest: {
+      vectors: [
+        {
+          id: conversationId,
+          values: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector
+          metadata: {
+            ...conversation,
+            record_type: "conversation",
+          },
+        },
+      ],
+      namespace: "",
     },
-  ])
+  })
 
   return conversation
 }
@@ -62,19 +67,22 @@ export async function createConversation(userId: string, title?: string): Promis
  * Gets all conversations for a user
  */
 export async function getConversationsByUserId(userId: string): Promise<Conversation[]> {
-  const pineconeIndex = getPineconeIndex()
+  const pineconeIndex = await getPineconeIndex()
 
   const queryResponse = await pineconeIndex.query({
-    vector: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector for metadata-only query
-    topK: 100,
-    includeMetadata: true,
-    filter: {
-      user_id: { $eq: userId },
-      record_type: { $eq: "conversation" },
+    queryRequest: {
+      vector: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector for metadata-only query
+      topK: 100,
+      includeMetadata: true,
+      filter: {
+        user_id: { $eq: userId },
+        record_type: { $eq: "conversation" },
+      },
+      namespace: "",
     },
   })
 
-  return queryResponse.matches.map((match) => ({
+  return (queryResponse.matches || []).map((match) => ({
     id: match.id,
     user_id: match.metadata?.user_id as string,
     title: match.metadata?.title as string,
@@ -88,19 +96,22 @@ export async function getConversationsByUserId(userId: string): Promise<Conversa
  * Gets a conversation by ID
  */
 export async function getConversationById(id: string): Promise<Conversation | null> {
-  const pineconeIndex = getPineconeIndex()
+  const pineconeIndex = await getPineconeIndex()
 
   const queryResponse = await pineconeIndex.query({
-    vector: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector for metadata-only query
-    topK: 1,
-    includeMetadata: true,
-    filter: {
-      id: { $eq: id },
-      record_type: { $eq: "conversation" },
+    queryRequest: {
+      vector: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector for metadata-only query
+      topK: 1,
+      includeMetadata: true,
+      filter: {
+        id: { $eq: id },
+        record_type: { $eq: "conversation" },
+      },
+      namespace: "",
     },
   })
 
-  if (queryResponse.matches.length === 0) {
+  if (!queryResponse.matches || queryResponse.matches.length === 0) {
     return null
   }
 
@@ -120,7 +131,7 @@ export async function getConversationById(id: string): Promise<Conversation | nu
  * Updates a conversation's title
  */
 export async function updateConversationTitle(id: string, title: string): Promise<Conversation> {
-  const pineconeIndex = getPineconeIndex()
+  const pineconeIndex = await getPineconeIndex()
 
   // Get current conversation
   const conversation = await getConversationById(id)
@@ -135,16 +146,21 @@ export async function updateConversationTitle(id: string, title: string): Promis
     updated_at: new Date().toISOString(),
   }
 
-  await pineconeIndex.upsert([
-    {
-      id,
-      values: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector
-      metadata: {
-        ...updatedConversation,
-        record_type: "conversation",
-      },
+  await pineconeIndex.upsert({
+    upsertRequest: {
+      vectors: [
+        {
+          id,
+          values: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector
+          metadata: {
+            ...updatedConversation,
+            record_type: "conversation",
+          },
+        },
+      ],
+      namespace: "",
     },
-  ])
+  })
 
   return updatedConversation
 }
@@ -153,26 +169,39 @@ export async function updateConversationTitle(id: string, title: string): Promis
  * Deletes a conversation and all its messages
  */
 export async function deleteConversation(id: string): Promise<void> {
-  const pineconeIndex = getPineconeIndex()
+  const pineconeIndex = await getPineconeIndex()
 
   // Delete the conversation
-  await pineconeIndex.deleteOne(id)
+  await pineconeIndex.delete({
+    deleteRequest: {
+      ids: [id],
+      namespace: "",
+    },
+  })
 
   // Find all messages for this conversation
   const queryResponse = await pineconeIndex.query({
-    vector: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector for metadata-only query
-    topK: 1000,
-    includeMetadata: true,
-    filter: {
-      conversation_id: { $eq: id },
-      record_type: { $eq: "message" },
+    queryRequest: {
+      vector: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector for metadata-only query
+      topK: 1000,
+      includeMetadata: true,
+      filter: {
+        conversation_id: { $eq: id },
+        record_type: { $eq: "message" },
+      },
+      namespace: "",
     },
   })
 
   // Delete all messages
-  if (queryResponse.matches.length > 0) {
+  if (queryResponse.matches && queryResponse.matches.length > 0) {
     const messageIds = queryResponse.matches.map((match) => match.id)
-    await pineconeIndex.deleteMany(messageIds)
+    await pineconeIndex.delete({
+      deleteRequest: {
+        ids: messageIds,
+        namespace: "",
+      },
+    })
   }
 }
 
@@ -180,19 +209,22 @@ export async function deleteConversation(id: string): Promise<void> {
  * Gets all messages for a conversation
  */
 export async function getMessagesByConversationId(conversationId: string): Promise<ChatMessage[]> {
-  const pineconeIndex = getPineconeIndex()
+  const pineconeIndex = await getPineconeIndex()
 
   const queryResponse = await pineconeIndex.query({
-    vector: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector for metadata-only query
-    topK: 100,
-    includeMetadata: true,
-    filter: {
-      conversation_id: { $eq: conversationId },
-      record_type: { $eq: "message" },
+    queryRequest: {
+      vector: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector for metadata-only query
+      topK: 100,
+      includeMetadata: true,
+      filter: {
+        conversation_id: { $eq: conversationId },
+        record_type: { $eq: "message" },
+      },
+      namespace: "",
     },
   })
 
-  const messages = queryResponse.matches.map((match) => ({
+  const messages = (queryResponse.matches || []).map((match) => ({
     id: match.id,
     conversation_id: match.metadata?.conversation_id as string,
     role: match.metadata?.role as "user" | "assistant" | "system",
@@ -214,7 +246,7 @@ export async function createMessage({
   content,
   sources,
 }: CreateMessageOptions): Promise<ChatMessage> {
-  const pineconeIndex = getPineconeIndex()
+  const pineconeIndex = await getPineconeIndex()
   const messageId = uuidv4()
   const now = new Date().toISOString()
 
@@ -234,32 +266,42 @@ export async function createMessage({
   })
 
   // Store message with embedding
-  await pineconeIndex.upsert([
-    {
-      id: messageId,
-      values: embedding,
-      metadata: {
-        ...message,
-        record_type: "message",
-      },
+  await pineconeIndex.upsert({
+    upsertRequest: {
+      vectors: [
+        {
+          id: messageId,
+          values: embedding,
+          metadata: {
+            ...message,
+            record_type: "message",
+          },
+        },
+      ],
+      namespace: "",
     },
-  ])
+  })
 
   // Update conversation message count and updated_at
   const conversation = await getConversationById(conversationId)
   if (conversation) {
-    await pineconeIndex.upsert([
-      {
-        id: conversationId,
-        values: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector
-        metadata: {
-          ...conversation,
-          message_count: conversation.message_count + 1,
-          updated_at: now,
-          record_type: "conversation",
-        },
+    await pineconeIndex.upsert({
+      upsertRequest: {
+        vectors: [
+          {
+            id: conversationId,
+            values: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector
+            metadata: {
+              ...conversation,
+              message_count: conversation.message_count + 1,
+              updated_at: now,
+              record_type: "conversation",
+            },
+          },
+        ],
+        namespace: "",
       },
-    ])
+    })
   }
 
   return message
@@ -348,19 +390,22 @@ async function retrieveRelevantContext(query: string, userId: string) {
     })
 
     // Query Pinecone for relevant chunks
-    const pineconeIndex = getPineconeIndex()
+    const pineconeIndex = await getPineconeIndex()
     const queryResponse = await pineconeIndex.query({
-      vector: embedding,
-      topK: DEFAULT_TOP_K,
-      includeMetadata: true,
-      filter: {
-        user_id: { $eq: userId },
-        record_type: { $eq: "chunk" },
+      queryRequest: {
+        vector: embedding,
+        topK: DEFAULT_TOP_K,
+        includeMetadata: true,
+        filter: {
+          user_id: { $eq: userId },
+          record_type: { $eq: "chunk" },
+        },
+        namespace: "",
       },
     })
 
     // Format results
-    return queryResponse.matches.map((match) => ({
+    return (queryResponse.matches || []).map((match) => ({
       content: match.metadata?.content as string,
       documentName: match.metadata?.document_name as string,
       score: match.score,

@@ -19,46 +19,55 @@ export const runtime = "edge"
 export const GET = withErrorHandling(async (request: NextRequest) => {
   return handleApiRequest(async () => {
     const userId = extractUserId(request)
-    const pineconeIndex = getPineconeIndex()
+    const pineconeIndex = await getPineconeIndex()
 
     // Get document count
     const documentQuery = await pineconeIndex.query({
-      vector: new Array(1536).fill(0),
-      topK: 1,
-      includeMetadata: true,
-      filter: {
-        user_id: { $eq: userId },
-        record_type: { $eq: "document" },
+      queryRequest: {
+        vector: new Array(1536).fill(0),
+        topK: 1,
+        includeMetadata: true,
+        filter: {
+          user_id: { $eq: userId },
+          record_type: { $eq: "document" },
+        },
+        namespace: "",
       },
     })
 
-    const documentCount = documentQuery.matches.length
+    const documentCount = documentQuery.matches?.length || 0
 
     // Get search count
     const searchQuery = await pineconeIndex.query({
-      vector: new Array(1536).fill(0),
-      topK: 1,
-      includeMetadata: true,
-      filter: {
-        user_id: { $eq: userId },
-        record_type: { $eq: "search_history" },
+      queryRequest: {
+        vector: new Array(1536).fill(0),
+        topK: 1,
+        includeMetadata: true,
+        filter: {
+          user_id: { $eq: userId },
+          record_type: { $eq: "search_history" },
+        },
+        namespace: "",
       },
     })
 
-    const searchCount = searchQuery.matches.length
+    const searchCount = searchQuery.matches?.length || 0
 
     // Get chat count
     const chatQuery = await pineconeIndex.query({
-      vector: new Array(1536).fill(0),
-      topK: 1,
-      includeMetadata: true,
-      filter: {
-        user_id: { $eq: userId },
-        record_type: { $eq: "conversation" },
+      queryRequest: {
+        vector: new Array(1536).fill(0),
+        topK: 1,
+        includeMetadata: true,
+        filter: {
+          user_id: { $eq: userId },
+          record_type: { $eq: "conversation" },
+        },
+        namespace: "",
       },
     })
 
-    const chatCount = chatQuery.matches.length
+    const chatCount = chatQuery.matches?.length || 0
 
     // Construct analytics data
     const analyticsData: AnalyticsData = {

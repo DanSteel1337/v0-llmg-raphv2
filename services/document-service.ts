@@ -38,7 +38,7 @@ export async function createDocument(
   fileSize: number,
   filePath: string,
 ): Promise<Document> {
-  const pineconeIndex = getPineconeIndex()
+  const pineconeIndex = await getPineconeIndex()
   const documentId = uuidv4()
   const now = new Date().toISOString()
 
@@ -56,16 +56,21 @@ export async function createDocument(
     updated_at: now,
   }
 
-  await pineconeIndex.upsert([
-    {
-      id: documentId,
-      values: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector
-      metadata: {
-        ...document,
-        record_type: "document",
-      },
+  await pineconeIndex.upsert({
+    upsertRequest: {
+      vectors: [
+        {
+          id: documentId,
+          values: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector
+          metadata: {
+            ...document,
+            record_type: "document",
+          },
+        },
+      ],
+      namespace: "",
     },
-  ])
+  })
 
   return document
 }
@@ -74,19 +79,22 @@ export async function createDocument(
  * Gets all documents for a user
  */
 export async function getDocumentsByUserId(userId: string): Promise<Document[]> {
-  const pineconeIndex = getPineconeIndex()
+  const pineconeIndex = await getPineconeIndex()
 
   const queryResponse = await pineconeIndex.query({
-    vector: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector for metadata-only query
-    topK: 100,
-    includeMetadata: true,
-    filter: {
-      user_id: { $eq: userId },
-      record_type: { $eq: "document" },
+    queryRequest: {
+      vector: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector for metadata-only query
+      topK: 100,
+      includeMetadata: true,
+      filter: {
+        user_id: { $eq: userId },
+        record_type: { $eq: "document" },
+      },
+      namespace: "",
     },
   })
 
-  return queryResponse.matches.map((match) => ({
+  return (queryResponse.matches || []).map((match) => ({
     id: match.id,
     name: match.metadata?.name || "Untitled",
     description: match.metadata?.description || "",
@@ -106,19 +114,22 @@ export async function getDocumentsByUserId(userId: string): Promise<Document[]> 
  * Gets a document by ID
  */
 export async function getDocumentById(id: string): Promise<Document | null> {
-  const pineconeIndex = getPineconeIndex()
+  const pineconeIndex = await getPineconeIndex()
 
   const queryResponse = await pineconeIndex.query({
-    vector: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector for metadata-only query
-    topK: 1,
-    includeMetadata: true,
-    filter: {
-      id: { $eq: id },
-      record_type: { $eq: "document" },
+    queryRequest: {
+      vector: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector for metadata-only query
+      topK: 1,
+      includeMetadata: true,
+      filter: {
+        id: { $eq: id },
+        record_type: { $eq: "document" },
+      },
+      namespace: "",
     },
   })
 
-  if (queryResponse.matches.length === 0) {
+  if (!queryResponse.matches || queryResponse.matches.length === 0) {
     return null
   }
 
@@ -149,7 +160,7 @@ export async function updateDocumentStatus(
   progress: number,
   errorMessage?: string,
 ): Promise<Document> {
-  const pineconeIndex = getPineconeIndex()
+  const pineconeIndex = await getPineconeIndex()
 
   // Get current document
   const document = await getDocumentById(documentId)
@@ -166,16 +177,21 @@ export async function updateDocumentStatus(
     updated_at: new Date().toISOString(),
   }
 
-  await pineconeIndex.upsert([
-    {
-      id: documentId,
-      values: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector
-      metadata: {
-        ...updatedDocument,
-        record_type: "document",
-      },
+  await pineconeIndex.upsert({
+    upsertRequest: {
+      vectors: [
+        {
+          id: documentId,
+          values: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector
+          metadata: {
+            ...updatedDocument,
+            record_type: "document",
+          },
+        },
+      ],
+      namespace: "",
     },
-  ])
+  })
 
   return updatedDocument
 }
@@ -184,26 +200,39 @@ export async function updateDocumentStatus(
  * Deletes a document and all its chunks
  */
 export async function deleteDocument(id: string): Promise<void> {
-  const pineconeIndex = getPineconeIndex()
+  const pineconeIndex = await getPineconeIndex()
 
   // Delete the document
-  await pineconeIndex.deleteOne(id)
+  await pineconeIndex.delete({
+    deleteRequest: {
+      ids: [id],
+      namespace: "",
+    },
+  })
 
   // Find all chunks for this document
   const queryResponse = await pineconeIndex.query({
-    vector: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector for metadata-only query
-    topK: 1000,
-    includeMetadata: true,
-    filter: {
-      document_id: { $eq: id },
-      record_type: { $eq: "chunk" },
+    queryRequest: {
+      vector: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector for metadata-only query
+      topK: 1000,
+      includeMetadata: true,
+      filter: {
+        document_id: { $eq: id },
+        record_type: { $eq: "chunk" },
+      },
+      namespace: "",
     },
   })
 
   // Delete all chunks
-  if (queryResponse.matches.length > 0) {
+  if (queryResponse.matches && queryResponse.matches.length > 0) {
     const chunkIds = queryResponse.matches.map((match) => match.id)
-    await pineconeIndex.deleteMany(chunkIds)
+    await pineconeIndex.delete({
+      deleteRequest: {
+        ids: chunkIds,
+        namespace: "",
+      },
+    })
   }
 }
 
@@ -513,7 +542,7 @@ function splitSectionIntoChunks(text: string, maxChunkSize: number, overlap: num
  * Generates embeddings for chunks and stores them in Pinecone
  */
 async function embedAndStoreChunks(chunks: DocumentChunk[]): Promise<void> {
-  const pineconeIndex = getPineconeIndex()
+  const pineconeIndex = await getPineconeIndex()
 
   // Process chunks in batches to avoid rate limits
   for (let i = 0; i < chunks.length; i += EMBEDDING_BATCH_SIZE) {
@@ -544,6 +573,11 @@ async function embedAndStoreChunks(chunks: DocumentChunk[]): Promise<void> {
     const embeddings = await Promise.all(embeddingPromises)
 
     // Store embeddings in Pinecone
-    await pineconeIndex.upsert(embeddings)
+    await pineconeIndex.upsert({
+      upsertRequest: {
+        vectors: embeddings,
+        namespace: "",
+      },
+    })
   }
 }

@@ -52,22 +52,27 @@ export async function logSearchQuery(
   searchType: string,
   filters: Record<string, any>,
 ): Promise<void> {
-  const pineconeIndex = getPineconeIndex()
+  const pineconeIndex = await getPineconeIndex()
 
-  await pineconeIndex.upsert([
-    {
-      id: uuidv4(),
-      values: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector
-      metadata: {
-        user_id: userId,
-        query,
-        search_type: searchType,
-        filters: JSON.stringify(filters),
-        record_type: "search_history",
-        created_at: new Date().toISOString(),
-      },
+  await pineconeIndex.upsert({
+    upsertRequest: {
+      vectors: [
+        {
+          id: uuidv4(),
+          values: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector
+          metadata: {
+            user_id: userId,
+            query,
+            search_type: searchType,
+            filters: JSON.stringify(filters),
+            record_type: "search_history",
+            created_at: new Date().toISOString(),
+          },
+        },
+      ],
+      namespace: "",
     },
-  ])
+  })
 }
 
 /**
@@ -102,16 +107,19 @@ async function semanticSearch(query: string, userId: string, options: SearchOpti
     }
 
     // Perform vector similarity search in Pinecone
-    const pineconeIndex = getPineconeIndex()
+    const pineconeIndex = await getPineconeIndex()
     const queryResponse = await pineconeIndex.query({
-      vector: embedding,
-      topK: DEFAULT_TOP_K,
-      includeMetadata: true,
-      filter,
+      queryRequest: {
+        vector: embedding,
+        topK: DEFAULT_TOP_K,
+        includeMetadata: true,
+        filter,
+        namespace: "",
+      },
     })
 
     // Format results
-    return formatSearchResults(queryResponse.matches)
+    return formatSearchResults(queryResponse.matches || [])
   } catch (error) {
     console.error("Error performing semantic search:", error)
     throw error
@@ -144,17 +152,20 @@ async function keywordSearch(query: string, userId: string, options: SearchOptio
     }
 
     // Get all chunks for this user with the applied filters
-    const pineconeIndex = getPineconeIndex()
+    const pineconeIndex = await getPineconeIndex()
     const queryResponse = await pineconeIndex.query({
-      vector: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector
-      topK: MAX_KEYWORD_RESULTS,
-      includeMetadata: true,
-      filter,
+      queryRequest: {
+        vector: new Array(VECTOR_DIMENSION).fill(0), // Placeholder vector
+        topK: MAX_KEYWORD_RESULTS,
+        includeMetadata: true,
+        filter,
+        namespace: "",
+      },
     })
 
     // Filter chunks that contain the query keywords
     const keywords = query.toLowerCase().split(/\s+/)
-    const filteredChunks = queryResponse.matches.filter((match) => {
+    const filteredChunks = (queryResponse.matches || []).filter((match) => {
       const content = ((match.metadata?.content as string) || "").toLowerCase()
       return keywords.some((keyword) => content.includes(keyword))
     })

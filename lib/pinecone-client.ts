@@ -6,75 +6,55 @@
  * throughout the application lifecycle.
  *
  * Dependencies:
- * - @pinecone-database/pinecone for vector database operations
- * - Environment variables: PINECONE_API_KEY, PINECONE_INDEX_NAME
+ * - @pinecone-database/pinecone v0.5.2 for vector database operations
+ * - Environment variables: PINECONE_API_KEY, PINECONE_ENVIRONMENT, PINECONE_INDEX_NAME
  */
 
-import { Pinecone } from "@pinecone-database/pinecone"
-import type { Index } from "@pinecone-database/pinecone"
+import { PineconeClient } from "@pinecone-database/pinecone"
 
-// Singleton instances
-let pineconeClient: Pinecone | null = null
-let pineconeIndex: Index | null = null
-
-/**
- * Create a new Pinecone client
- * @private
- */
-const createPineconeClient = (): Pinecone => {
-  const apiKey = process.env.PINECONE_API_KEY
-
-  if (!apiKey) {
-    console.error("Missing Pinecone API key")
-    throw new Error("Missing required environment variable: PINECONE_API_KEY")
-  }
-
-  return new Pinecone({ apiKey })
-}
+// Initialize the client
+let pineconeClient: PineconeClient | null = null
+let isInitialized = false
 
 /**
  * Get the Pinecone client singleton
  */
-export const getPineconeClient = (): Pinecone => {
+export const getPineconeClient = async (): Promise<PineconeClient> => {
   if (!pineconeClient) {
-    try {
-      pineconeClient = createPineconeClient()
-    } catch (error) {
-      console.error("Error creating Pinecone client:", error)
-      throw error
-    }
+    pineconeClient = new PineconeClient()
   }
+
+  if (!isInitialized) {
+    await pineconeClient.init({
+      apiKey: process.env.PINECONE_API_KEY!,
+      environment: process.env.PINECONE_ENVIRONMENT!,
+    })
+    isInitialized = true
+  }
+
   return pineconeClient
 }
 
 /**
  * Get the Pinecone index singleton
  */
-export const getPineconeIndex = (): Index => {
-  if (!pineconeIndex) {
-    try {
-      const client = getPineconeClient()
-      const indexName = process.env.PINECONE_INDEX_NAME
+export const getPineconeIndex = async () => {
+  const client = await getPineconeClient()
+  const indexName = process.env.PINECONE_INDEX_NAME
 
-      if (!indexName) {
-        console.error("Missing Pinecone index name")
-        throw new Error("Missing required environment variable: PINECONE_INDEX_NAME")
-      }
-
-      pineconeIndex = client.index(indexName)
-    } catch (error) {
-      console.error("Error getting Pinecone index:", error)
-      throw error
-    }
+  if (!indexName) {
+    console.error("Missing Pinecone index name")
+    throw new Error("Missing required environment variable: PINECONE_INDEX_NAME")
   }
-  return pineconeIndex
+
+  return client.Index(indexName)
 }
 
 /**
- * Reset the Pinecone client and index singletons
+ * Reset the Pinecone client singleton
  * Useful for testing or when environment variables change
  */
 export const resetPineconeClient = (): void => {
   pineconeClient = null
-  pineconeIndex = null
+  isInitialized = false
 }
