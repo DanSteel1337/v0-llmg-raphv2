@@ -1,3 +1,8 @@
+/**
+ * Core document logic: metadata creation, chunking, embedding, and Pinecone upsert.
+ * Server-only: used in Edge API routes only.
+ */
+
 import { upsertVectors, queryVectors, deleteVectors } from "@/lib/pinecone-rest-client"
 import { generateEmbedding } from "@/lib/embedding-service"
 import { chunkDocument } from "@/lib/chunking-utils"
@@ -315,10 +320,20 @@ export async function processDocument({
     if (!response.ok) {
       const errorMessage = `Failed to fetch document: ${response.status} ${response.statusText}`
       console.error(errorMessage, { documentId, fileUrl })
+      await updateDocumentStatus(documentId, "failed", 0, errorMessage)
       return { success: false, chunksProcessed: 0, vectorsInserted: 0, error: errorMessage }
     }
 
     const text = await response.text()
+
+    // Validate content is not empty
+    if (!text || text.trim() === "") {
+      const errorMessage = "Document is empty or contains no valid text content"
+      console.error(errorMessage, { documentId, fileUrl })
+      await updateDocumentStatus(documentId, "failed", 0, errorMessage)
+      return { success: false, chunksProcessed: 0, vectorsInserted: 0, error: errorMessage }
+    }
+
     console.log(`Processing document: Content fetched successfully`, {
       documentId,
       contentLength: text.length,
@@ -343,6 +358,7 @@ export async function processDocument({
     if (chunks.length === 0) {
       const errorMessage = "Document processing failed: No valid content chunks could be extracted"
       console.error(errorMessage, { documentId, fileName })
+      await updateDocumentStatus(documentId, "failed", 0, errorMessage)
       return { success: false, chunksProcessed: 0, vectorsInserted: 0, error: errorMessage }
     }
 
@@ -479,6 +495,7 @@ export async function processDocument({
     if (successfulEmbeddings === 0) {
       const errorMessage = `Document processing failed: Could not generate any valid embeddings from ${chunks.length} chunks`
       console.error(errorMessage, { documentId })
+      await updateDocumentStatus(documentId, "failed", 0, errorMessage)
       return {
         success: false,
         chunksProcessed: chunks.length,
@@ -486,6 +503,9 @@ export async function processDocument({
         error: errorMessage,
       }
     }
+
+    // Mark document as indexed
+    await updateDocumentStatus(documentId, "indexed", 100)
 
     console.log(`Processing document: Complete`, {
       documentId,
@@ -503,6 +523,14 @@ export async function processDocument({
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error occurred"
     console.error("Error processing document:", error, { documentId })
+
+    // Update document status to failed
+    try {
+      await updateDocumentStatus(documentId, "failed", 0, errorMessage)
+    } catch (statusError) {
+      console.error("Failed to update document status after error:", statusError)
+    }
+
     return {
       success: false,
       chunksProcessed: 0,

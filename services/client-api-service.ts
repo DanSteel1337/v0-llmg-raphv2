@@ -1,22 +1,6 @@
 /**
- * Client API Service
- *
- * This file contains all client-side API functions for interacting with the server.
- *
- * EXPORTS:
- * ---------
- * - fetchDocuments: Fetches all documents for a user
- * - uploadDocument: Uploads a document for a user
- * - deleteDocument: Deletes a document by ID
- * - fetchAnalytics: Fetches analytics data for a user
- * - checkApiHealth: Checks the health of the API and its services
- * - fetchConversations: Fetches all conversations for a user
- * - createConversation: Creates a new conversation
- * - fetchMessages: Fetches all messages for a conversation
- * - sendMessage: Sends a message in a conversation
- * - performSearch: Performs a search with optional filters
- *
- * IMPORTANT: When adding new functions to this file, please update the exports list above.
+ * Client API abstraction for document creation and upload flow.
+ * Handles metadata creation, file upload, and triggers processing pipeline.
  */
 
 import { apiCall } from "./apiCall"
@@ -91,6 +75,31 @@ export async function uploadDocument(
     method: "POST",
     body: formData,
   })
+
+  // Construct the file URL for processing
+  const fileUrl = `${window.location.origin}/api/documents/file?path=${encodeURIComponent(document.file_path)}`
+
+  // Trigger document processing
+  try {
+    await apiCall<{ success: boolean }>("/api/documents/process", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        documentId: document.id,
+        userId: userId,
+        filePath: document.file_path,
+        fileName: file.name,
+        fileType: file.type,
+        fileUrl: fileUrl,
+      }),
+    })
+  } catch (error) {
+    console.error("Error triggering document processing:", error)
+    // We don't throw here to avoid blocking the UI - the document is created and uploaded,
+    // but processing might have failed. The UI will show the document as "processing" or "failed".
+  }
 
   // Poll for document status updates
   if (onProgress) {

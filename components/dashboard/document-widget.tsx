@@ -1,13 +1,6 @@
 /**
- * Document Widget Component
- *
- * A dashboard widget for document management, showing recent documents
- * and providing quick upload functionality.
- *
- * Dependencies:
- * - @/hooks/use-documents for document data
- * - @/components/ui/dashboard-card for layout
- * - @/types for document types
+ * Dashboard widget for document upload and listing.
+ * Handles optimistic UI update and monitors document processing progress.
  */
 
 "use client"
@@ -31,6 +24,8 @@ export function DocumentWidget({ userId, limit = 5 }: DocumentWidgetProps) {
   const { documents, isLoading, error, uploadDocument, refreshDocuments } = useDocuments(userId)
   const [isUploading, setIsUploading] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [processingDocuments, setProcessingDocuments] = useState<Set<string>>(new Set())
+  const [processingTimeouts, setProcessingTimeouts] = useState<Record<string, NodeJS.Timeout>>({})
   const fileInputRef = useRef<HTMLInputElement>(null)
   const { addToast } = useToast()
 
@@ -44,6 +39,57 @@ export function DocumentWidget({ userId, limit = 5 }: DocumentWidgetProps) {
       setErrorMessage(null)
     }
   }, [error, addToast])
+
+  // Track processing documents and set up polling
+  useEffect(() => {
+    if (!Array.isArray(documents)) return
+
+    // Find documents that are still processing
+    const currentlyProcessing = new Set<string>()
+    documents.forEach((doc) => {
+      if (doc.status === "processing") {
+        currentlyProcessing.add(doc.id)
+
+        // Set up timeout warning for documents that have been processing for too long
+        if (!processingTimeouts[doc.id]) {
+          const timeout = setTimeout(() => {
+            addToast(`Document "${doc.name}" is taking longer than expected to process.`, "warning")
+          }, 60000) // 60 seconds
+
+          setProcessingTimeouts((prev) => ({
+            ...prev,
+            [doc.id]: timeout,
+          }))
+        }
+      } else if (processingTimeouts[doc.id]) {
+        // Clear timeout for documents that are no longer processing
+        clearTimeout(processingTimeouts[doc.id])
+        setProcessingTimeouts((prev) => {
+          const newTimeouts = { ...prev }
+          delete newTimeouts[doc.id]
+          return newTimeouts
+        })
+      }
+    })
+
+    setProcessingDocuments(currentlyProcessing)
+
+    // If we have processing documents, poll for updates
+    if (currentlyProcessing.size > 0) {
+      const pollInterval = setInterval(() => {
+        refreshDocuments()
+      }, 5000) // Poll every 5 seconds
+
+      return () => clearInterval(pollInterval)
+    }
+  }, [documents, processingTimeouts, addToast, refreshDocuments])
+
+  // Clean up timeouts on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(processingTimeouts).forEach((timeout) => clearTimeout(timeout))
+    }
+  }, [processingTimeouts])
 
   // Retry loading documents if there was an error
   const handleRetry = () => {
@@ -76,7 +122,10 @@ export function DocumentWidget({ userId, limit = 5 }: DocumentWidgetProps) {
         throw new Error("Document upload failed: Missing document ID in response")
       }
 
-      addToast("Document uploaded successfully", "success")
+      addToast("Document uploaded successfully and processing started", "success")
+
+      // Refresh documents to show the new one
+      refreshDocuments()
     } catch (error) {
       console.error("Upload error:", error)
       const message = error instanceof Error ? error.message : "Unknown error occurred"
@@ -144,6 +193,15 @@ export function DocumentWidget({ userId, limit = 5 }: DocumentWidgetProps) {
           accept=".pdf,.docx,.txt,.md"
         />
 
+        {processingDocuments.size > 0 && (
+          <div className="bg-blue-50 border border-blue-200 text-blue-700 px-4 py-3 rounded-md">
+            <div className="flex items-center">
+              <div className="animate-spin mr-2 h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full"></div>
+              <span>Processing {processingDocuments.size} document(s)...</span>
+            </div>
+          </div>
+        )}
+
         {recentDocuments.length > 0 ? (
           <ul className="divide-y divide-gray-200">
             {recentDocuments.map((doc) => (
@@ -154,6 +212,9 @@ export function DocumentWidget({ userId, limit = 5 }: DocumentWidgetProps) {
                     <p className="text-sm font-medium text-gray-900 truncate max-w-[200px]">{doc.name}</p>
                     <p className="text-xs text-gray-500">
                       {formatFileSize(doc.file_size)} • {formatDate(doc.created_at)}
+                      {doc.status === "processing" && doc.processing_progress !== undefined && (
+                        <span className="ml-2 text-blue-500">{Math.round(doc.processing_progress)}%</span>
+                      )}
                     </p>
                   </div>
                 </div>
