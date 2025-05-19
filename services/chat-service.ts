@@ -73,6 +73,12 @@ export async function getConversationsByUserId(userId: string): Promise<Conversa
     },
   )
 
+  // Handle potential error from Pinecone
+  if ("error" in response && response.error) {
+    console.error("Error querying conversations from Pinecone:", response)
+    return [] // Return empty array as fallback
+  }
+
   return (response.matches || []).map((match) => ({
     id: match.id,
     user_id: match.metadata?.user_id as string,
@@ -96,6 +102,12 @@ export async function getConversationById(id: string): Promise<Conversation | nu
       record_type: { $eq: "conversation" },
     },
   )
+
+  // Handle potential error from Pinecone
+  if ("error" in response && response.error) {
+    console.error("Error querying conversation from Pinecone:", response)
+    return null // Return null as fallback
+  }
 
   if (!response.matches || response.matches.length === 0) {
     return null
@@ -183,6 +195,12 @@ export async function getMessagesByConversationId(conversationId: string): Promi
     },
   )
 
+  // Handle potential error from Pinecone
+  if ("error" in response && response.error) {
+    console.error("Error querying messages from Pinecone:", response)
+    return [] // Return empty array as fallback
+  }
+
   const messages = (response.matches || []).map((match) => ({
     id: match.id,
     conversation_id: match.metadata?.conversation_id as string,
@@ -269,7 +287,10 @@ export async function generateResponse(
     const recentHistory = history.slice(-MAX_HISTORY_MESSAGES).map((msg) => ({ role: msg.role, content: msg.content }))
 
     // 3. Create system message with context
-    const systemMessage = `${SYSTEM_PROMPT}\n\nContext:\n${context.map((item) => `${item.content} [Document: ${item.documentName}]`).join("\n\n")}`
+    const systemMessage = `${SYSTEM_PROMPT}
+
+Context:
+${context.map((item) => `${item.content} [Document: ${item.documentName}]`).join("\n\n")}`
 
     // 4. Generate response
     const { text: responseContent } = await generateText({
@@ -287,14 +308,7 @@ export async function generateResponse(
       }
     })
 
-    // 5. Save user message
-    await createMessage({
-      conversationId,
-      role: "user",
-      content: userMessage,
-    })
-
-    // 6. Save assistant response
+    // 5. Save assistant response
     const assistantMessage = await createMessage({
       conversationId,
       role: "assistant",
@@ -322,6 +336,12 @@ async function retrieveRelevantContext(query: string, userId: string) {
       user_id: { $eq: userId },
       record_type: { $eq: "chunk" },
     })
+
+    // Handle potential error from Pinecone
+    if ("error" in response && response.error) {
+      console.error("Error retrieving context from Pinecone:", response)
+      return [] // Return empty array as fallback
+    }
 
     // Format results
     return (response.matches || []).map((match) => ({

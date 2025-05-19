@@ -139,6 +139,13 @@ async function semanticSearch(query: string, userId: string, options: SearchOpti
     })
 
     const response = await queryVectors(embedding, DEFAULT_TOP_K, true, filter)
+
+    // Handle potential error from Pinecone
+    if ("error" in response && response.error) {
+      console.error("Error in semantic search Pinecone query:", response)
+      return [] // Return empty array as fallback
+    }
+
     console.log("Pinecone query completed", { matchCount: response.matches?.length || 0 })
 
     // Format results
@@ -188,6 +195,13 @@ async function keywordSearch(query: string, userId: string, options: SearchOptio
       true,
       filter,
     )
+
+    // Handle potential error from Pinecone
+    if ("error" in response && response.error) {
+      console.error("Error in keyword search Pinecone query:", response)
+      return [] // Return empty array as fallback
+    }
+
     console.log("Pinecone query completed", { totalChunks: response.matches?.length || 0 })
 
     // Filter chunks that contain the query keywords

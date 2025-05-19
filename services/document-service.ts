@@ -80,6 +80,12 @@ export async function getDocumentsByUserId(userId: string): Promise<Document[]> 
     },
   )
 
+  // Handle potential error from Pinecone
+  if ("error" in response && response.error) {
+    console.error("Error querying documents from Pinecone:", response)
+    return [] // Return empty array as fallback
+  }
+
   return (response.matches || []).map((match) => ({
     id: match.id,
     user_id: match.metadata?.user_id as string,
@@ -109,6 +115,12 @@ export async function getDocumentById(id: string): Promise<Document | null> {
       record_type: { $eq: "document" },
     },
   )
+
+  // Handle potential error from Pinecone
+  if ("error" in response && response.error) {
+    console.error("Error querying document from Pinecone:", response)
+    return null // Return null as fallback
+  }
 
   if (!response.matches || response.matches.length === 0) {
     return null

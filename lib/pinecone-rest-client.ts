@@ -11,39 +11,28 @@ if (!apiKey) {
   console.error("PINECONE_API_KEY is not defined")
 }
 
-const indexName = process.env.PINECONE_INDEX_NAME
-if (!indexName) {
-  console.error("PINECONE_INDEX_NAME is not defined")
+// Use direct host URL instead of constructing it
+const host = process.env.PINECONE_HOST
+if (!host) {
+  console.error("PINECONE_HOST is not defined")
 }
-
-const environment = process.env.PINECONE_ENVIRONMENT
-if (!environment) {
-  console.error("PINECONE_ENVIRONMENT is not defined")
-}
-
-// Fixed URL construction for Pinecone serverless
-const indexHost = `https://${indexName}.svc.${environment}.pinecone.io`
 
 /**
  * Upsert vectors to Pinecone
  */
 export async function upsertVectors(vectors: any[], namespace = "") {
-  console.log(`Upserting ${vectors.length} vectors to Pinecone index: ${indexName}`)
+  console.log(`Upserting ${vectors.length} vectors to Pinecone`)
 
   try {
     if (!apiKey) {
       throw new Error("PINECONE_API_KEY is not defined")
     }
 
-    if (!indexName) {
-      throw new Error("PINECONE_INDEX_NAME is not defined")
+    if (!host) {
+      throw new Error("PINECONE_HOST is not defined")
     }
 
-    if (!environment) {
-      throw new Error("PINECONE_ENVIRONMENT is not defined")
-    }
-
-    const response = await fetch(`${indexHost}/vectors/upsert`, {
+    const response = await fetch(`${host}/vectors/upsert`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -57,8 +46,7 @@ export async function upsertVectors(vectors: any[], namespace = "") {
       console.error(`Pinecone upsert error: Status ${response.status}`, {
         statusText: response.statusText,
         error: errorText,
-        indexName,
-        environment,
+        host: host.split(".")[0], // Log only the first part of the host for security
         vectorCount: vectors.length,
       })
       throw new Error(`Pinecone upsert failed: ${response.status} ${response.statusText} - ${errorText}`)
@@ -83,7 +71,7 @@ export async function queryVectors(
   filter?: Record<string, any>,
   namespace = "",
 ) {
-  console.log(`Querying Pinecone index: ${indexName}`, {
+  console.log(`Querying Pinecone`, {
     topK,
     filter: filter ? JSON.stringify(filter).substring(0, 100) + "..." : "none",
   })
@@ -93,12 +81,8 @@ export async function queryVectors(
       throw new Error("PINECONE_API_KEY is not defined")
     }
 
-    if (!indexName) {
-      throw new Error("PINECONE_INDEX_NAME is not defined")
-    }
-
-    if (!environment) {
-      throw new Error("PINECONE_ENVIRONMENT is not defined")
+    if (!host) {
+      throw new Error("PINECONE_HOST is not defined")
     }
 
     const queryBody: any = {
@@ -112,7 +96,7 @@ export async function queryVectors(
       queryBody.filter = filter
     }
 
-    const response = await fetch(`${indexHost}/query`, {
+    const response = await fetch(`${host}/query`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -126,12 +110,13 @@ export async function queryVectors(
       console.error(`Pinecone query error: Status ${response.status}`, {
         statusText: response.statusText,
         error: errorText,
-        indexName,
-        environment,
+        host: host.split(".")[0], // Log only the first part of the host for security
         topK,
         filter: filter ? JSON.stringify(filter).substring(0, 100) + "..." : "none",
       })
-      throw new Error(`Pinecone query failed: ${response.status} ${response.statusText} - ${errorText}`)
+
+      // Return empty matches instead of throwing to provide fallback behavior
+      return { matches: [], error: true, status: response.status }
     }
 
     const result = await response.json()
@@ -142,7 +127,8 @@ export async function queryVectors(
     return result
   } catch (error) {
     console.error("Pinecone query exception:", error)
-    throw error
+    // Return empty matches instead of throwing to provide fallback behavior
+    return { matches: [], error: true, errorMessage: error instanceof Error ? error.message : String(error) }
   }
 }
 
@@ -150,22 +136,18 @@ export async function queryVectors(
  * Delete vectors from Pinecone
  */
 export async function deleteVectors(ids: string[], namespace = "") {
-  console.log(`Deleting ${ids.length} vectors from Pinecone index: ${indexName}`)
+  console.log(`Deleting ${ids.length} vectors from Pinecone`)
 
   try {
     if (!apiKey) {
       throw new Error("PINECONE_API_KEY is not defined")
     }
 
-    if (!indexName) {
-      throw new Error("PINECONE_INDEX_NAME is not defined")
+    if (!host) {
+      throw new Error("PINECONE_HOST is not defined")
     }
 
-    if (!environment) {
-      throw new Error("PINECONE_ENVIRONMENT is not defined")
-    }
-
-    const response = await fetch(`${indexHost}/vectors/delete`, {
+    const response = await fetch(`${host}/vectors/delete`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -179,8 +161,7 @@ export async function deleteVectors(ids: string[], namespace = "") {
       console.error(`Pinecone delete error: Status ${response.status}`, {
         statusText: response.statusText,
         error: errorText,
-        indexName,
-        environment,
+        host: host.split(".")[0], // Log only the first part of the host for security
         idCount: ids.length,
       })
       throw new Error(`Pinecone delete failed: ${response.status} ${response.statusText} - ${errorText}`)

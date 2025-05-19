@@ -28,7 +28,10 @@ export const GET = withErrorHandling(async (request: NextRequest) => {
         user_id: { $eq: userId },
         record_type: { $eq: "document" },
       })
-      const documentCount = documentQuery.matches?.length || 0
+
+      // Handle potential error from Pinecone
+      const documentCount = "error" in documentQuery && documentQuery.error ? 0 : documentQuery.matches?.length || 0
+
       console.log(`GET /api/analytics - Document count query result`, { documentCount })
 
       // Get search count
@@ -37,7 +40,10 @@ export const GET = withErrorHandling(async (request: NextRequest) => {
         user_id: { $eq: userId },
         record_type: { $eq: "search_history" },
       })
-      const searchCount = searchQuery.matches?.length || 0
+
+      // Handle potential error from Pinecone
+      const searchCount = "error" in searchQuery && searchQuery.error ? 0 : searchQuery.matches?.length || 0
+
       console.log(`GET /api/analytics - Search count query result`, { searchCount })
 
       // Get chat count
@@ -46,7 +52,10 @@ export const GET = withErrorHandling(async (request: NextRequest) => {
         user_id: { $eq: userId },
         record_type: { $eq: "conversation" },
       })
-      const chatCount = chatQuery.matches?.length || 0
+
+      // Handle potential error from Pinecone
+      const chatCount = "error" in chatQuery && chatQuery.error ? 0 : chatQuery.matches?.length || 0
+
       console.log(`GET /api/analytics - Chat count query result`, { chatCount })
 
       // Construct analytics data
