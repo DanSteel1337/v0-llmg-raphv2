@@ -1,4 +1,19 @@
-// Info: Improved error boundary component with better error handling
+/**
+ * Error Boundary Component
+ *
+ * A React error boundary component that catches JavaScript errors anywhere in its
+ * child component tree and displays a fallback UI instead of crashing the whole app.
+ *
+ * Features:
+ * - Catches render errors and unhandled promise rejections
+ * - Provides a reset mechanism to recover from errors
+ * - Supports custom fallback UI
+ * - Includes a higher-order component for easy wrapping
+ *
+ * Dependencies:
+ * - React hooks for state management
+ */
+
 "use client"
 
 import type React from "react"

@@ -1,4 +1,15 @@
-// Info: Utilities for API response handling with consistent patterns
+/**
+ * API Utilities
+ *
+ * Provides standardized utilities for API response handling, error management,
+ * and request validation. These utilities ensure consistent API behavior
+ * across all endpoints.
+ *
+ * Dependencies:
+ * - next/server for NextResponse
+ * - @/types for API response types
+ */
+
 import { NextResponse } from "next/server"
 import type { ApiError, ApiSuccess } from "@/types"
 

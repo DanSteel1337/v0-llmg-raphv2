@@ -1,4 +1,19 @@
-// Info: Optimized document service with better organization and reduced duplication
+/**
+ * Document Service
+ *
+ * Handles document management operations including:
+ * - Document creation, retrieval, and deletion
+ * - Document processing and chunking
+ * - Text extraction and embedding generation
+ * - Vector storage in Pinecone
+ *
+ * Dependencies:
+ * - @/lib/pinecone-client.ts for vector storage
+ * - @/lib/supabase-client.ts for file storage
+ * - @ai-sdk/openai for embeddings
+ * - uuid for ID generation
+ */
+
 import { v4 as uuidv4 } from "uuid"
 import { getPineconeIndex } from "@/lib/pinecone-client"
 import { getSupabaseBrowserClient } from "@/lib/supabase-client"

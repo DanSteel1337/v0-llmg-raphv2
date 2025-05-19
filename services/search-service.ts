@@ -1,4 +1,18 @@
-// Info: Optimized search service with better organization and reduced duplication
+/**
+ * Search Service
+ *
+ * Handles search functionality including:
+ * - Semantic search using vector embeddings
+ * - Keyword search for text matching
+ * - Hybrid search combining both approaches
+ * - Search analytics logging
+ *
+ * Dependencies:
+ * - @/lib/pinecone-client.ts for vector storage and retrieval
+ * - @ai-sdk/openai for embeddings
+ * - uuid for ID generation
+ */
+
 import { openai } from "@ai-sdk/openai"
 import { embed } from "ai"
 import { v4 as uuidv4 } from "uuid"

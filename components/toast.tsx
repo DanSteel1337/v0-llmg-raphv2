@@ -1,4 +1,22 @@
-// Info: Reusable toast notification component
+/**
+ * Toast Component
+ *
+ * A React toast notification system that provides a simple way to show
+ * temporary messages to users. Supports different types of notifications
+ * (success, error, info, warning) and customizable duration.
+ *
+ * Features:
+ * - Multiple toast types with appropriate styling
+ * - Automatic dismissal after configurable duration
+ * - Manual dismissal via close button
+ * - Stacked display for multiple toasts
+ * - Animated entrance and exit
+ *
+ * Dependencies:
+ * - React context for global state management
+ * - React hooks for component lifecycle
+ */
+
 "use client"
 
 import type React from "react"

@@ -1,4 +1,15 @@
-// Info: Singleton client for Pinecone
+/**
+ * Pinecone Client
+ *
+ * Provides a singleton instance of the Pinecone client for vector operations.
+ * This module ensures that only one connection to Pinecone is maintained
+ * throughout the application lifecycle.
+ *
+ * Dependencies:
+ * - @pinecone-database/pinecone for vector database operations
+ * - Environment variables: PINECONE_API_KEY, PINECONE_INDEX_NAME
+ */
+
 import { Pinecone } from "@pinecone-database/pinecone"
 import type { Index } from "@pinecone-database/pinecone"
 
@@ -6,7 +17,10 @@ import type { Index } from "@pinecone-database/pinecone"
 let pineconeClient: Pinecone | null = null
 let pineconeIndex: Index | null = null
 
-// Create a Pinecone client
+/**
+ * Create a new Pinecone client
+ * @private
+ */
 const createPineconeClient = (): Pinecone => {
   const apiKey = process.env.PINECONE_API_KEY
 
@@ -18,7 +32,9 @@ const createPineconeClient = (): Pinecone => {
   return new Pinecone({ apiKey })
 }
 
-// Get the Pinecone client (singleton)
+/**
+ * Get the Pinecone client singleton
+ */
 export const getPineconeClient = (): Pinecone => {
   if (!pineconeClient) {
     try {
@@ -31,7 +47,9 @@ export const getPineconeClient = (): Pinecone => {
   return pineconeClient
 }
 
-// Get the Pinecone index (singleton)
+/**
+ * Get the Pinecone index singleton
+ */
 export const getPineconeIndex = (): Index => {
   if (!pineconeIndex) {
     try {
@@ -52,7 +70,10 @@ export const getPineconeIndex = (): Index => {
   return pineconeIndex
 }
 
-// Reset clients (useful for testing)
+/**
+ * Reset the Pinecone client and index singletons
+ * Useful for testing or when environment variables change
+ */
 export const resetPineconeClient = (): void => {
   pineconeClient = null
   pineconeIndex = null
