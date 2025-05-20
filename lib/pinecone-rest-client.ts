@@ -56,7 +56,7 @@ export function getPineconeClient() {
       pineconeHost = `https://${pineconeHost}`
     }
 
-    // Log the host URL for debugging
+    // Log the host URL for debugging (safely)
     logger.info(`Initialized Pinecone client with host: ${pineconeHost}`)
   }
 
@@ -324,11 +324,7 @@ export async function deleteVectors(ids: string[], namespace = "") {
 
     if (!response.ok) {
       const errorText = await response.text()
-      logger.error(`Delete failed: ${response.status} - ${errorText}`, {
-        host,
-        namespace,
-        idCount: safeIds.length,
-      })
+      logger.error(`Delete failed: ${response.status} - ${errorText}`, { host })
       throw new Error(`Delete failed: ${response.status} ${response.statusText} - ${errorText}`)
     }
 
@@ -351,6 +347,9 @@ export async function deleteVectors(ids: string[], namespace = "") {
 export async function healthCheck(): Promise<{ healthy: boolean; error?: string }> {
   try {
     const { apiKey, host } = getPineconeClient()
+
+    // Log the host for debugging (safely)
+    logger.info(`Performing health check with host: ${host}`)
 
     // Create a minimal vector for the health check
     const dummyVector = createPlaceholderVector()
@@ -380,10 +379,11 @@ export async function healthCheck(): Promise<{ healthy: boolean; error?: string 
 
     return { healthy: true }
   } catch (error) {
-    logger.error("Health check exception:", error)
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    logger.error("Health check exception:", { error: errorMessage })
     return {
       healthy: false,
-      error: `Health check exception: ${error instanceof Error ? error.message : String(error)}`,
+      error: `Health check exception: ${errorMessage}`,
     }
   }
 }

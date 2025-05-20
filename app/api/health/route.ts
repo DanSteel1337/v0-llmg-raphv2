@@ -25,22 +25,26 @@ export const GET = withErrorHandling(async (request: NextRequest) => {
 
     // Check Pinecone health
     let pineconeHealthy = false
+    let pineconeError = null
     try {
       const pineconeHealth = await pineconeHealthCheck()
       pineconeHealthy = pineconeHealth.healthy
+      pineconeError = pineconeHealth.error
 
       logger.info("Pinecone health check result", {
         healthy: pineconeHealthy,
-        error: pineconeHealth.error,
+        error: pineconeError,
       })
     } catch (error) {
+      pineconeError = error instanceof Error ? error.message : String(error)
       logger.error("Pinecone health check failed", {
-        error: error instanceof Error ? error.message : String(error),
+        error: pineconeError,
       })
     }
 
     // Check OpenAI health - simple connectivity test
     let openaiHealthy = false
+    let openaiError = null
     try {
       // Simple availability check using a minimal API call
       const openaiKey = process.env.OPENAI_API_KEY
@@ -56,24 +60,33 @@ export const GET = withErrorHandling(async (request: NextRequest) => {
       })
 
       openaiHealthy = openaiResponse.ok
+      if (!openaiResponse.ok) {
+        openaiError = `Status ${openaiResponse.status}: ${openaiResponse.statusText}`
+      }
 
       logger.info("OpenAI health check result", {
         healthy: openaiHealthy,
         status: openaiResponse.status,
+        error: openaiError,
       })
     } catch (error) {
+      openaiError = error instanceof Error ? error.message : String(error)
       logger.error("OpenAI health check failed", {
-        error: error instanceof Error ? error.message : String(error),
+        error: openaiError,
       })
     }
 
-    // Return combined health status
+    // Return combined health status with detailed error information
     return {
       status: pineconeHealthy && openaiHealthy ? "healthy" : "degraded",
       timestamp: new Date().toISOString(),
       services: {
         pinecone: pineconeHealthy,
         openai: openaiHealthy,
+      },
+      errors: {
+        pinecone: pineconeError,
+        openai: openaiError,
       },
     }
   }, request)

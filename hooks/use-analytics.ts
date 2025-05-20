@@ -4,6 +4,7 @@
  * Analytics Hook
  *
  * Custom hook for fetching and managing analytics data.
+ * Provides analytics metrics, API health status, and refresh functionality.
  *
  * Dependencies:
  * - @/services/client-api-service for API calls
@@ -20,12 +21,13 @@ export function useAnalytics(userId: string) {
   const [pineconeApiHealthy, setPineconeApiHealthy] = useState<boolean | null>(null)
   const [openaiApiHealthy, setOpenaiApiHealthy] = useState<boolean | null>(null)
   const [isCheckingHealth, setIsCheckingHealth] = useState(false)
+  const [healthErrors, setHealthErrors] = useState<{
+    pinecone?: string | null
+    openai?: string | null
+  }>({})
 
-  const fetchData = useCallback(async () => {
-    if (!userId) {
-      setIsLoading(false)
-      return
-    }
+  const loadAnalytics = useCallback(async () => {
+    if (!userId) return
 
     try {
       setIsLoading(true)
@@ -33,7 +35,7 @@ export function useAnalytics(userId: string) {
       const data = await fetchAnalytics(userId)
       setAnalytics(data)
     } catch (err) {
-      console.error("Error fetching analytics:", err)
+      console.error("Error loading analytics:", err)
       setError(err instanceof Error ? err : new Error(String(err)))
     } finally {
       setIsLoading(false)
@@ -43,9 +45,25 @@ export function useAnalytics(userId: string) {
   const checkHealth = useCallback(async () => {
     try {
       setIsCheckingHealth(true)
+      setPineconeApiHealthy(null)
+      setOpenaiApiHealthy(null)
+
       const health = await checkApiHealth()
+
+      // Log the health check results for debugging
+      console.log("Health check results:", health)
+
       setPineconeApiHealthy(health.pineconeApiHealthy)
       setOpenaiApiHealthy(health.openaiApiHealthy)
+      setHealthErrors(health.errors || {})
+
+      // If there are errors, log them for debugging
+      if (health.errors?.pinecone) {
+        console.error("Pinecone health check error:", health.errors.pinecone)
+      }
+      if (health.errors?.openai) {
+        console.error("OpenAI health check error:", health.errors.openai)
+      }
     } catch (err) {
       console.error("Error checking API health:", err)
       setPineconeApiHealthy(false)
@@ -55,22 +73,13 @@ export function useAnalytics(userId: string) {
     }
   }, [])
 
+  const refreshAnalytics = useCallback(async () => {
+    await Promise.all([loadAnalytics(), checkHealth()])
+  }, [loadAnalytics, checkHealth])
+
   useEffect(() => {
-    fetchData()
-    checkHealth()
-
-    // Set up a health check interval (every 5 minutes)
-    const healthInterval = setInterval(checkHealth, 5 * 60 * 1000)
-
-    return () => {
-      clearInterval(healthInterval)
-    }
-  }, [fetchData, checkHealth])
-
-  const refreshAnalytics = useCallback(() => {
-    fetchData()
-    checkHealth()
-  }, [fetchData, checkHealth])
+    refreshAnalytics()
+  }, [refreshAnalytics])
 
   return {
     analytics,
@@ -80,5 +89,6 @@ export function useAnalytics(userId: string) {
     pineconeApiHealthy,
     openaiApiHealthy,
     isCheckingHealth,
+    healthErrors,
   }
 }

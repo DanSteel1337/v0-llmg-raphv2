@@ -3,7 +3,7 @@
  *
  * Client-side abstraction for API calls to handle document management and other operations.
  * Handles metadata creation, file upload, and triggers processing pipeline.
- * 
+ *
  * Dependencies:
  * - ./apiCall for standardized API request formatting
  */
@@ -32,7 +32,7 @@ export async function fetchDocuments(userId: string): Promise<Document[]> {
  * 1. Create document metadata
  * 2. Upload file content
  * 3. Trigger processing pipeline
- * 
+ *
  * @param userId User ID for document ownership
  * @param file File object to upload
  * @param onProgress Optional progress callback for monitoring
@@ -103,14 +103,14 @@ export async function uploadDocument(
     console.log("File uploaded successfully:", {
       documentId: document.id,
       filePath: document.file_path,
-      fileUrl
+      fileUrl,
     })
 
     // Step 3: Process the document
     console.log("Triggering document processing...", {
       documentId: document.id,
       filePath: document.file_path,
-      fileUrl
+      fileUrl,
     })
 
     const processResponse = await apiCall<{ success: boolean }>("/api/documents/process", {
@@ -200,22 +200,46 @@ export async function fetchAnalytics(userId: string, timeRange = "7d"): Promise<
 
 /**
  * Check API health status for services
- * @returns Health status object
+ * @returns Health status object with detailed error information
  */
-export async function checkApiHealth(): Promise<{ pineconeApiHealthy: boolean; openaiApiHealthy: boolean }> {
+export async function checkApiHealth(): Promise<{
+  pineconeApiHealthy: boolean
+  openaiApiHealthy: boolean
+  errors?: {
+    pinecone?: string | null
+    openai?: string | null
+  }
+}> {
   try {
-    const response = await apiCall<{ status: string; services: Record<string, boolean> }>('/api/health')
-    
+    const response = await apiCall<{
+      status: string
+      services: Record<string, boolean>
+      errors?: {
+        pinecone?: string | null
+        openai?: string | null
+      }
+    }>("/api/health")
+
+    // Log the full response for debugging
+    console.log("Health check response:", response)
+
     return {
       pineconeApiHealthy: response?.services?.pinecone || false,
-      openaiApiHealthy: response?.services?.openai || false
+      openaiApiHealthy: response?.services?.openai || false,
+      errors: response?.errors || {},
     }
   } catch (error) {
-    // Mock response on error for graceful degradation
+    // Log the error for debugging
     console.error("Error checking API health:", error)
+
+    // Return detailed error information
     return {
       pineconeApiHealthy: false,
-      openaiApiHealthy: false
+      openaiApiHealthy: false,
+      errors: {
+        pinecone: error instanceof Error ? error.message : "Failed to connect to health check endpoint",
+        openai: error instanceof Error ? error.message : "Failed to connect to health check endpoint",
+      },
     }
   }
 }
@@ -244,7 +268,7 @@ export async function createConversation(userId: string, title: string): Promise
     },
     body: JSON.stringify({ userId, title }),
   })
-  
+
   return response.conversation
 }
 
@@ -273,7 +297,7 @@ export async function sendMessage(conversationId: string, content: string, userI
     },
     body: JSON.stringify({ conversationId, content, userId }),
   })
-  
+
   return response.message
 }
 
@@ -286,34 +310,34 @@ export async function sendMessage(conversationId: string, content: string, userI
  */
 export async function performSearch(
   userId: string,
-  query: string, 
-  options: { 
-    type?: "semantic" | "keyword" | "hybrid",
-    documentTypes?: string[],
-    sortBy?: string,
-    dateRange?: { from?: string, to?: string }
-  } = {}
+  query: string,
+  options: {
+    type?: "semantic" | "keyword" | "hybrid"
+    documentTypes?: string[]
+    sortBy?: string
+    dateRange?: { from?: string; to?: string }
+  } = {},
 ): Promise<SearchResult[]> {
   // Build query string
   let url = `/api/search?userId=${encodeURIComponent(userId)}&q=${encodeURIComponent(query)}`
-  
+
   // Add search type
   if (options.type) {
     url += `&type=${encodeURIComponent(options.type)}`
   }
-  
+
   // Add document type filters if any
   if (options.documentTypes && options.documentTypes.length > 0) {
-    options.documentTypes.forEach(type => {
+    options.documentTypes.forEach((type) => {
       url += `&documentType=${encodeURIComponent(type)}`
     })
   }
-  
+
   // Add sort option if specified
   if (options.sortBy) {
     url += `&sortBy=${encodeURIComponent(options.sortBy)}`
   }
-  
+
   // Add date range if specified
   if (options.dateRange) {
     if (options.dateRange.from) {
@@ -323,7 +347,7 @@ export async function performSearch(
       url += `&to=${encodeURIComponent(options.dateRange.to)}`
     }
   }
-  
+
   // Execute search
   const response = await apiCall<{ results: SearchResult[] }>(url)
   return Array.isArray(response.results) ? response.results : []

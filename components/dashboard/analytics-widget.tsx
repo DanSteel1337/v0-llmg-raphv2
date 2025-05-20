@@ -22,6 +22,7 @@ import {
   X,
   ChevronDown,
   ChevronUp,
+  HelpCircle,
 } from "lucide-react"
 import { DashboardCard } from "@/components/ui/dashboard-card"
 import { useAnalytics } from "@/hooks/use-analytics"
@@ -35,10 +36,20 @@ interface AnalyticsWidgetProps {
 const MAX_VECTORS_PER_QUERY = 10000
 
 export function AnalyticsWidget({ userId }: AnalyticsWidgetProps) {
-  const { analytics, isLoading, error, refreshAnalytics, pineconeApiHealthy, openaiApiHealthy, isCheckingHealth } =
-    useAnalytics(userId)
+  const {
+    analytics,
+    isLoading,
+    error,
+    refreshAnalytics,
+    pineconeApiHealthy,
+    openaiApiHealthy,
+    isCheckingHealth,
+    healthErrors,
+  } = useAnalytics(userId)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [showDebug, setShowDebug] = useState(false)
+  const [showPineconeError, setShowPineconeError] = useState(false)
+  const [showOpenAIError, setShowOpenAIError] = useState(false)
   const { addToast } = useToast()
 
   // Check if we're in debug mode
@@ -102,6 +113,8 @@ export function AnalyticsWidget({ userId }: AnalyticsWidgetProps) {
                   ? "bg-red-100 text-red-800"
                   : "bg-gray-100 text-gray-800"
             }`}
+            onClick={() => healthErrors?.pinecone && setShowPineconeError(!showPineconeError)}
+            style={{ cursor: healthErrors?.pinecone ? "pointer" : "default" }}
           >
             {pineconeApiHealthy === null ? (
               <span className="animate-pulse">Checking Pinecone...</span>
@@ -114,6 +127,7 @@ export function AnalyticsWidget({ userId }: AnalyticsWidgetProps) {
               <>
                 <X className="h-4 w-4" />
                 <span>Pinecone API</span>
+                {healthErrors?.pinecone && <HelpCircle className="h-3 w-3 ml-1" />}
               </>
             )}
           </div>
@@ -126,6 +140,8 @@ export function AnalyticsWidget({ userId }: AnalyticsWidgetProps) {
                   ? "bg-red-100 text-red-800"
                   : "bg-gray-100 text-gray-800"
             }`}
+            onClick={() => healthErrors?.openai && setShowOpenAIError(!showOpenAIError)}
+            style={{ cursor: healthErrors?.openai ? "pointer" : "default" }}
           >
             {openaiApiHealthy === null ? (
               <span className="animate-pulse">Checking OpenAI...</span>
@@ -138,6 +154,7 @@ export function AnalyticsWidget({ userId }: AnalyticsWidgetProps) {
               <>
                 <X className="h-4 w-4" />
                 <span>OpenAI API</span>
+                {healthErrors?.openai && <HelpCircle className="h-3 w-3 ml-1" />}
               </>
             )}
           </div>
@@ -161,6 +178,34 @@ export function AnalyticsWidget({ userId }: AnalyticsWidgetProps) {
             </button>
           )}
         </div>
+
+        {/* Error Details */}
+        {showPineconeError && healthErrors?.pinecone && (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md mb-4">
+            <div className="flex items-start">
+              <AlertCircle className="h-5 w-5 mr-2 mt-0.5" />
+              <div>
+                <h4 className="font-medium">Pinecone API Error</h4>
+                <p className="text-sm mt-1">{healthErrors.pinecone}</p>
+                <p className="text-xs mt-2">
+                  Check that your PINECONE_HOST is set correctly to the exact host URL from the Pinecone console.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showOpenAIError && healthErrors?.openai && (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md mb-4">
+            <div className="flex items-start">
+              <AlertCircle className="h-5 w-5 mr-2 mt-0.5" />
+              <div>
+                <h4 className="font-medium">OpenAI API Error</h4>
+                <p className="text-sm mt-1">{healthErrors.openai}</p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {(mightBeTruncated.documents ||
           mightBeTruncated.chunks ||
@@ -239,9 +284,37 @@ export function AnalyticsWidget({ userId }: AnalyticsWidgetProps) {
               {showDebug ? "Hide Debug Info" : "Show Debug Info"}
             </button>
 
-            {showDebug && analytics && (
+            {showDebug && (
               <div className="mt-2 p-4 bg-gray-50 rounded-md overflow-auto max-h-96">
-                <pre className="text-xs">{JSON.stringify(analytics, null, 2)}</pre>
+                <h4 className="font-medium mb-2">Analytics Data</h4>
+                <pre className="text-xs mb-4">{JSON.stringify(analytics, null, 2)}</pre>
+
+                <h4 className="font-medium mb-2">Health Status</h4>
+                <pre className="text-xs mb-4">
+                  {JSON.stringify(
+                    {
+                      pineconeApiHealthy,
+                      openaiApiHealthy,
+                      healthErrors,
+                    },
+                    null,
+                    2,
+                  )}
+                </pre>
+
+                <h4 className="font-medium mb-2">Environment Variables (Safe)</h4>
+                <pre className="text-xs">
+                  {JSON.stringify(
+                    {
+                      PINECONE_HOST_SET: !!process.env.PINECONE_HOST,
+                      PINECONE_API_KEY_SET: !!process.env.PINECONE_API_KEY,
+                      PINECONE_INDEX_NAME_SET: !!process.env.PINECONE_INDEX_NAME,
+                      OPENAI_API_KEY_SET: !!process.env.OPENAI_API_KEY,
+                    },
+                    null,
+                    2,
+                  )}
+                </pre>
               </div>
             )}
           </div>
