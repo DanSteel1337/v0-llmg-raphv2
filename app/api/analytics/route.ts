@@ -1,18 +1,23 @@
 /**
  * Analytics API Route
  *
- * API endpoint for fetching analytics data from Pinecone.
+ * Provides analytics data about documents, searches, and chats.
+ * This route is Edge-compatible and works with Vercel's serverless environment.
  *
  * Dependencies:
- * - @/services/analytics-service.ts for analytics operations
- * - @/lib/api-utils for API response handling
+ * - @/utils/errorHandling for consistent error handling
+ * - @/utils/apiRequest for standardized API responses
+ * - @/lib/pinecone-rest-client for vector operations
+ * - @/lib/embedding-config for vector dimension configuration
+ * - @/lib/utils/logger for logging
  */
 
 import type { NextRequest } from "next/server"
-import { handleApiRequest, extractUserId, createSuccessResponse } from "@/lib/api-utils"
-import { withErrorHandling } from "@/lib/error-handler"
-import { queryVectors } from "@/lib/pinecone-rest-client"
-import { VECTOR_DIMENSION } from "@/lib/embedding-config"
+import { handleApiRequest } from "@/utils/apiRequest"
+import { withErrorHandling } from "@/utils/errorHandling"
+import { ValidationError } from "@/utils/validation"
+import { queryVectors, createPlaceholderVector } from "@/lib/pinecone-rest-client"
+import { logger } from "@/lib/utils/logger"
 
 export const runtime = "edge"
 
@@ -23,38 +28,38 @@ export const GET = withErrorHandling(async (request: NextRequest) => {
   return handleApiRequest(async () => {
     try {
       const { searchParams } = new URL(request.url)
-      const userId = extractUserId(request) || searchParams.get("userId")
+      const userId = searchParams.get("userId")
       const debug = searchParams.get("debug") === "true"
 
-      console.log(`GET /api/analytics - Fetching analytics for user`, { userId, debug })
+      logger.info(`GET /api/analytics - Fetching analytics for user`, { userId, debug })
 
       if (!userId) {
-        throw new Error("User ID is required")
+        throw new ValidationError("User ID is required")
       }
 
-      // Create a dummy vector for querying with the correct dimension (3072)
-      const dummyVector = new Array(VECTOR_DIMENSION).fill(0.001)
+      // Create a placeholder vector for querying
+      const placeholderVector = createPlaceholderVector()
 
       // Get document count
-      const documentResult = await queryVectors(dummyVector, MAX_VECTORS_PER_QUERY, true, {
+      const documentResult = await queryVectors(placeholderVector, MAX_VECTORS_PER_QUERY, true, {
         record_type: "document",
         user_id: userId,
       })
 
       // Get chunk count
-      const chunkResult = await queryVectors(dummyVector, MAX_VECTORS_PER_QUERY, true, {
+      const chunkResult = await queryVectors(placeholderVector, MAX_VECTORS_PER_QUERY, true, {
         record_type: "chunk",
         user_id: userId,
       })
 
       // Get search count
-      const searchResult = await queryVectors(dummyVector, MAX_VECTORS_PER_QUERY, true, {
+      const searchResult = await queryVectors(placeholderVector, MAX_VECTORS_PER_QUERY, true, {
         record_type: "search_history",
         user_id: userId,
       })
 
       // Get chat count
-      const chatResult = await queryVectors(dummyVector, MAX_VECTORS_PER_QUERY, true, {
+      const chatResult = await queryVectors(placeholderVector, MAX_VECTORS_PER_QUERY, true, {
         record_type: "message",
         user_id: userId,
       })
@@ -107,7 +112,7 @@ export const GET = withErrorHandling(async (request: NextRequest) => {
         },
       }
 
-      console.log(`GET /api/analytics - Successfully fetched analytics data`, {
+      logger.info(`GET /api/analytics - Successfully fetched analytics data`, {
         userId,
         documentCount,
         searchCount,
@@ -115,55 +120,13 @@ export const GET = withErrorHandling(async (request: NextRequest) => {
         chunkCount,
       })
 
-      // Include debug information if requested
-      if (debug) {
-        return {
-          ...analyticsData,
-          debug: {
-            documentResult: {
-              matchCount: documentMatches.length,
-              error: documentResult.error || false,
-            },
-            chunkResult: {
-              matchCount: chunkMatches.length,
-              error: chunkResult.error || false,
-            },
-            searchResult: {
-              matchCount: searchMatches.length,
-              error: searchResult.error || false,
-            },
-            chatResult: {
-              matchCount: chatMatches.length,
-              error: chatResult.error || false,
-            },
-          },
-        }
-      }
-
       return analyticsData
     } catch (error) {
-      console.error("GET /api/analytics - Error fetching analytics", {
+      logger.error("GET /api/analytics - Error fetching analytics", {
         error: error instanceof Error ? error.message : "Unknown error",
         stack: error instanceof Error ? error.stack : undefined,
-        url: request.url,
       })
-
-      // Return fallback data instead of throwing
-      return createSuccessResponse({
-        documentCount: 0,
-        searchCount: 0,
-        chatCount: 0,
-        chunkCount: 0,
-        topDocuments: [],
-        topSearches: [],
-        mightBeTruncated: {
-          documents: false,
-          chunks: false,
-          searches: false,
-          chats: false,
-        },
-        error: error instanceof Error ? error.message : "Unknown error",
-      })
+      throw error
     }
-  })
+  }, request)
 })

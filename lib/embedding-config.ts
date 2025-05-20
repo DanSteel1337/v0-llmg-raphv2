@@ -2,6 +2,10 @@
  * Embedding Configuration
  *
  * Centralizes embedding model selection and dimension validation.
+ * This configuration is Edge-compatible and works with Vercel's serverless environment.
+ *
+ * Dependencies:
+ * - None
  */
 
 export const EMBEDDING_MODEL = "text-embedding-3-large"

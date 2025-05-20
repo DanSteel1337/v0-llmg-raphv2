@@ -2,10 +2,15 @@
  * Embedding Service
  *
  * Handles embedding generation using OpenAI's API.
- * This service is designed to be used in Edge runtime.
+ * This service is Edge-compatible and works with Vercel's serverless environment.
+ *
+ * Dependencies:
+ * - @/lib/embedding-config for model and dimension configuration
+ * - @/lib/utils/logger for logging
  */
 
 import { EMBEDDING_MODEL, validateVectorDimension } from "./embedding-config"
+import { logger } from "@/lib/utils/logger"
 
 // Cache for the OpenAI API key
 let openaiApiKey: string | null = null
@@ -34,6 +39,11 @@ export async function generateEmbedding(text: string): Promise<number[]> {
   try {
     const apiKey = getOpenAIApiKey()
 
+    logger.info("Generating embedding", {
+      textLength: text.length,
+      model: EMBEDDING_MODEL,
+    })
+
     const response = await fetch("https://api.openai.com/v1/embeddings", {
       method: "POST",
       headers: {
@@ -57,9 +67,14 @@ export async function generateEmbedding(text: string): Promise<number[]> {
     // Validate the embedding
     validateVectorDimension(embedding)
 
+    logger.info("Successfully generated embedding", {
+      dimensions: embedding.length,
+      model: EMBEDDING_MODEL,
+    })
+
     return embedding
   } catch (error) {
-    console.error("Error generating embedding:", error)
+    logger.error("Error generating embedding:", error)
     throw error
   }
 }

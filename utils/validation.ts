@@ -1,5 +1,11 @@
 /**
- * Validation utilities for API requests
+ * Validation Utilities
+ *
+ * Provides validation functions for API requests.
+ * These utilities are Edge-compatible and work with Vercel's serverless environment.
+ *
+ * Dependencies:
+ * - @/lib/utils/logger for logging
  */
 
 import { logger } from "@/lib/utils/logger"

@@ -1,6 +1,12 @@
 /**
- * Error handling utility for API routes
- * Wraps API handlers with consistent error handling
+ * Error Handling Utility
+ *
+ * Provides standardized error handling for API routes.
+ * This utility is Edge-compatible and works with Vercel's serverless environment.
+ *
+ * Dependencies:
+ * - next/server for NextResponse
+ * - @/lib/utils/logger for logging
  */
 
 import { NextResponse } from "next/server"
@@ -18,12 +24,24 @@ export const withErrorHandling = (handler: ApiHandler) => {
     try {
       return await handler(req)
     } catch (error) {
-      logger.error("API error:", { error: error instanceof Error ? error.message : String(error) })
+      logger.error("API error:", {
+        error: error instanceof Error ? error.message : String(error),
+        url: req.url,
+        method: req.method,
+      })
 
       const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred"
       const statusCode = error instanceof Error && "statusCode" in error ? (error as any).statusCode : 500
 
-      return NextResponse.json({ success: false, error: errorMessage }, { status: statusCode })
+      return NextResponse.json(
+        {
+          success: false,
+          error: errorMessage,
+        },
+        {
+          status: statusCode,
+        },
+      )
     }
   }
 }

@@ -7,7 +7,6 @@ import { SearchWidget } from "@/components/dashboard/search-widget"
 import { ChatWidget } from "@/components/dashboard/chat-widget"
 import { AnalyticsWidget } from "@/components/dashboard/analytics-widget"
 import { SettingsWidget } from "@/components/dashboard/settings-widget"
-import { ApiDebugWidget } from "@/components/dashboard/api-debug-widget"
 
 export default function DashboardPage() {
   const { user, isLoading } = useAuth()
@@ -57,11 +56,6 @@ export default function DashboardPage() {
 
             {/* Analytics Widget */}
             <AnalyticsWidget userId={userId} />
-
-            {/* API Debug Widget */}
-            <div className="lg:col-span-2">
-              <ApiDebugWidget userId={userId} />
-            </div>
 
             {/* Settings Widget */}
             <div className="lg:col-span-2">
