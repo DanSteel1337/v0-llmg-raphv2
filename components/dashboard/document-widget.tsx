@@ -84,13 +84,16 @@ export function DocumentWidget({ userId }: DocumentWidgetProps) {
       setCurrentStep(undefined)
 
       try {
-        // Create a stable progress callback that's properly bound to this component instance
+        // Create a simple callback that doesn't use closures or component state directly
+        // Instead, we'll use primitive values that are copied by value
         const updateProgress = (progress: number, step?: ProcessingStep) => {
-          // Use functional updates to ensure we're working with the latest state
-          setUploadProgress((currentProgress) => progress)
-          if (step) {
-            setCurrentStep((currentStep) => step)
-          }
+          // Use window.setTimeout to break the closure chain
+          window.setTimeout(() => {
+            setUploadProgress(progress)
+            if (step !== undefined) {
+              setCurrentStep(step)
+            }
+          }, 0)
         }
 
         await uploadDocument(file, updateProgress)

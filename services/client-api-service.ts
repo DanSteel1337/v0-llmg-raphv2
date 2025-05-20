@@ -99,6 +99,17 @@ export async function uploadDocument(
     if (!userId) throw new Error("User ID is required")
     if (!file) throw new Error("File is required")
 
+    // Create a safe progress callback that won't throw if it becomes invalid
+    const safeProgress = (progress: number, step?: ProcessingStep) => {
+      try {
+        if (typeof onProgress === "function") {
+          onProgress(progress, step)
+        }
+      } catch (error) {
+        console.error("Error in progress callback:", error)
+      }
+    }
+
     // Step 1: Create document metadata
     console.log("Creating document metadata...", {
       userId,
@@ -138,9 +149,7 @@ export async function uploadDocument(
     })
 
     // Update progress with initializing step
-    if (typeof onProgress === "function") {
-      onProgress(5, ProcessingStep.INITIALIZING)
-    }
+    safeProgress(5, ProcessingStep.INITIALIZING)
 
     const formData = new FormData()
     formData.append("file", file)
@@ -164,9 +173,7 @@ export async function uploadDocument(
     }
 
     // Update progress with reading file step
-    if (typeof onProgress === "function") {
-      onProgress(10, ProcessingStep.READING_FILE)
-    }
+    safeProgress(10, ProcessingStep.READING_FILE)
 
     // Get the file URL (prioritize blobUrl)
     const fileUrl =
@@ -216,74 +223,75 @@ export async function uploadDocument(
 
     // Step 4: Set up progress tracking if callback provided
     if (typeof onProgress === "function") {
-      // Store the callback in a local variable to ensure it's preserved
-      const progressCallback = onProgress
+      // Initial progress update - use the safe wrapper
+      safeProgress(15, ProcessingStep.CHUNKING)
 
-      // Initial progress update
-      if (typeof progressCallback === "function") {
-        progressCallback(15, ProcessingStep.CHUNKING)
+      // Use a simple polling mechanism without closures
+      const documentId = document.id // Capture document ID in local variable
+
+      // Create a polling function that doesn't rely on closures
+      const pollDocumentStatus = () => {
+        fetchDocuments(userId)
+          .then((documents) => {
+            const updatedDoc = documents.find((d) => d.id === documentId)
+            if (!updatedDoc) return
+
+            try {
+              if (updatedDoc.status === "indexed") {
+                safeProgress(100, ProcessingStep.COMPLETED)
+                return true // Signal to stop polling
+              } else if (updatedDoc.status === "failed") {
+                safeProgress(0, ProcessingStep.FAILED)
+                return true // Signal to stop polling
+              } else if (updatedDoc.processing_progress !== undefined) {
+                // Ensure progress is at least 15% once processing starts
+                const progress = Math.max(15, updatedDoc.processing_progress)
+
+                // Determine processing step based on progress
+                let step = updatedDoc.processing_step
+                if (!step) {
+                  if (progress < 20) step = ProcessingStep.CHUNKING
+                  else if (progress < 40) step = ProcessingStep.EMBEDDING
+                  else if (progress < 80) step = ProcessingStep.INDEXING
+                  else step = ProcessingStep.FINALIZING
+                }
+
+                safeProgress(progress, step)
+              }
+            } catch (error) {
+              console.error("Error updating progress:", error)
+            }
+
+            return false // Continue polling
+          })
+          .catch((error) => {
+            console.error("Error polling document status:", error)
+            return true // Signal to stop polling on error
+          })
       }
 
-      let pollInterval: NodeJS.Timeout | null = setInterval(async () => {
-        try {
-          const documents = await fetchDocuments(userId)
-          const updatedDocument = documents.find((d) => d.id === document.id)
+      // Start polling with setTimeout instead of setInterval
+      // This avoids overlapping calls and is more robust
+      let isPolling = true
+      const poll = () => {
+        if (!isPolling) return
 
-          if (updatedDocument) {
-            // Check if callback is still a function before calling it
-            if (typeof progressCallback !== "function") {
-              if (pollInterval) {
-                clearInterval(pollInterval)
-                pollInterval = null
-              }
-              return
-            }
-
-            if (updatedDocument.status === "indexed") {
-              if (pollInterval) {
-                clearInterval(pollInterval)
-                pollInterval = null
-              }
-              progressCallback(100, ProcessingStep.COMPLETED)
-            } else if (updatedDocument.status === "failed") {
-              if (pollInterval) {
-                clearInterval(pollInterval)
-                pollInterval = null
-              }
-              progressCallback(0, ProcessingStep.FAILED)
-            } else if (updatedDocument.processing_progress !== undefined) {
-              // Ensure progress is at least 15% once processing starts
-              const progress = Math.max(15, updatedDocument.processing_progress)
-
-              // Determine processing step based on progress
-              let step = updatedDocument.processing_step
-              if (!step) {
-                if (progress < 20) step = ProcessingStep.CHUNKING
-                else if (progress < 40) step = ProcessingStep.EMBEDDING
-                else if (progress < 80) step = ProcessingStep.INDEXING
-                else step = ProcessingStep.FINALIZING
-              }
-
-              progressCallback(progress, step)
-            }
-          }
-        } catch (error) {
-          console.error("Error polling document status:", error)
-          // Don't let errors in polling prevent cleanup
-          if (pollInterval) {
-            clearInterval(pollInterval)
-            pollInterval = null
-          }
+        const shouldStop = pollDocumentStatus()
+        if (shouldStop) {
+          isPolling = false
+          return
         }
-      }, 2000)
 
-      // Clean up interval after 5 minutes (max processing time)
+        setTimeout(poll, 2000)
+      }
+
+      // Start polling
+      setTimeout(poll, 2000)
+
+      // Stop polling after 5 minutes (max processing time)
       setTimeout(
         () => {
-          if (pollInterval) {
-            clearInterval(pollInterval)
-            pollInterval = null
-          }
+          isPolling = false
         },
         5 * 60 * 1000,
       )
