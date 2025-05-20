@@ -1,7 +1,4 @@
-export const runtime = "edge"
-
-// Update maxDuration to be within the valid range (1-60 seconds)
-export const maxDuration = 60
+// app/api/documents/process/route.ts
 
 import type { NextRequest } from "next/server"
 import { handleApiRequest } from "@/utils/apiRequest"
@@ -9,12 +6,12 @@ import { withErrorHandling } from "@/utils/errorHandling"
 import { processDocument } from "@/lib/document-service"
 import { logger } from "@/lib/utils/logger"
 
-/**
- * POST handler for document processing
- * Validates inputs and triggers asynchronous document processing
- */
+export const runtime = "edge"
+export const maxDuration = 60 // 60 seconds max duration for Edge function
+
 export const POST = withErrorHandling(async (request: NextRequest) => {
   return handleApiRequest(async () => {
+    // Parse the request body
     const body = await request.json()
     const { documentId, userId, filePath, fileName, fileType, fileUrl } = body
 
@@ -45,11 +42,12 @@ export const POST = withErrorHandling(async (request: NextRequest) => {
       filePath,
       fileName,
       fileType,
-      fileUrl: fileUrl.substring(0, 100) + (fileUrl.length > 100 ? "..." : ""),
     })
 
-    // Process the document asynchronously
-    processDocument({
+    // Start processing the document asynchronously
+    // This is done asynchronously with a detached Promise to avoid 
+    // blocking the response while processing runs in the background
+    const processingPromise = processDocument({
       documentId,
       userId,
       filePath,
@@ -60,11 +58,24 @@ export const POST = withErrorHandling(async (request: NextRequest) => {
       logger.error(`POST /api/documents/process - Error processing document`, {
         documentId,
         error: error instanceof Error ? error.message : "Unknown error",
-        stack: error instanceof Error ? error.stack : undefined,
+      })
+    })
+
+    // Add .catch to prevent unhandled promise rejection
+    processingPromise.catch(err => {
+      logger.error(`Unhandled error in background processing task:`, {
+        error: err instanceof Error ? err.message : "Unknown error",
+        documentId
       })
     })
 
     logger.info(`POST /api/documents/process - Document processing started`, { documentId })
-    return { success: true, status: "processing" }
+    
+    // Return immediate success response while processing continues in the background
+    return { 
+      success: true, 
+      status: "processing",
+      message: "Document processing started successfully"
+    }
   }, request)
 })

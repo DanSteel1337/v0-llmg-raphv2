@@ -115,6 +115,7 @@ export async function uploadDocument(
 
     const uploadResponse = await apiCall<{
       success: boolean
+      documentId: string
       fileUrl: string
       blobUrl?: string
     }>("/api/documents/upload", {
@@ -127,65 +128,46 @@ export async function uploadDocument(
       throw new Error("File upload failed")
     }
 
-    // Prioritize blobUrl if available, fall back to fileUrl
-    const fileUrl =
-      uploadResponse.blobUrl ||
-      uploadResponse.fileUrl ||
+    // Get the file URL (prioritize blobUrl)
+    const fileUrl = uploadResponse.blobUrl || uploadResponse.fileUrl || 
       `/api/documents/file?path=${encodeURIComponent(document.file_path)}`
 
     console.log("File uploaded successfully:", {
       documentId: document.id,
-      filePath: document.file_path,
       fileUrl,
-      hasBlobUrl: !!uploadResponse.blobUrl,
     })
 
     // Step 3: Process the document
     console.log("Triggering document processing...", {
       documentId: document.id,
-      filePath: document.file_path,
       fileUrl,
     })
 
     try {
-      const processResponse = await apiCall<{ success: boolean; status?: string; message?: string; error?: string }>(
-        "/api/documents/process",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            documentId: document.id,
-            userId,
-            filePath: document.file_path,
-            fileName: file.name,
-            fileType: file.type || "text/plain",
-            fileUrl,
-          }),
-        },
-      )
+      const processResponse = await apiCall<{ success: boolean; status?: string }>("/api/documents/process", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          documentId: document.id,
+          userId,
+          filePath: document.file_path,
+          fileName: file.name,
+          fileType: file.type || "text/plain",
+          fileUrl,
+        }),
+      })
 
-      // Log the full response for debugging
-      console.log("Document processing response:", processResponse)
-
-      if (!processResponse || processResponse.success !== true) {
-        const errorMessage = processResponse?.error || "Unknown error"
-        console.error("Document processing failed to start:", { error: errorMessage, response: processResponse })
-        throw new Error(`Failed to start document processing: ${errorMessage}`)
+      if (!processResponse.success) {
+        throw new Error(processResponse.error || "Document processing failed to start")
       }
 
       console.log("Document processing triggered:", {
         documentId: document.id,
-        filePath: document.file_path,
-        fileUrl,
         status: processResponse.status || "processing",
       })
-    } catch (processError) {
-      console.error("Error triggering document processing:", processError)
-      throw new Error(
-        `Failed to start document processing: ${
-          processError instanceof Error ? processError.message : "Unknown error"
-        }`,
-      )
+    } catch (error) {
+      console.error("Error triggering document processing:", error)
+      throw new Error(`Failed to start document processing: ${error instanceof Error ? error.message : "Unknown error"}`)
     }
 
     // Poll for document status updates if progress callback provided
@@ -199,17 +181,8 @@ export async function uploadDocument(
             if (updatedDocument.status === "indexed" || updatedDocument.status === "failed") {
               clearInterval(pollInterval)
               onProgress(updatedDocument.status === "indexed" ? 100 : 0)
-              console.log("Document processing completed:", {
-                documentId: document.id,
-                status: updatedDocument.status,
-                message: updatedDocument.error_message || "Success",
-              })
             } else if (updatedDocument.processing_progress !== undefined) {
               onProgress(updatedDocument.processing_progress)
-              console.log("Document processing progress:", {
-                documentId: document.id,
-                progress: updatedDocument.processing_progress,
-              })
             }
           }
         } catch (error) {
@@ -221,7 +194,10 @@ export async function uploadDocument(
       setTimeout(() => clearInterval(pollInterval), 5 * 60 * 1000)
     }
 
-    return document
+    return {
+      ...document,
+      blob_url: uploadResponse.blobUrl,  // Add blob URL to document
+    }
   } catch (error) {
     console.error("Document upload pipeline failed:", error)
     throw error
