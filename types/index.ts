@@ -2,6 +2,7 @@
  * Type Definitions
  *
  * Shared types used throughout the application.
+ * Provides consistent interfaces for documents, search, chats, analytics, etc.
  *
  * IMPORTANT:
  * - ALWAYS use these shared types for consistency
@@ -9,7 +10,7 @@
  * - ALWAYS use the standard document status values: "processing", "indexed", "failed"
  * - Document IDs should follow the format: doc_${timestamp}_${random}
  *
- * @module types
+ * @module types/index
  */
 
 // Document types
@@ -22,7 +23,7 @@ export interface Document {
   file_size: number
   file_path: string
   blob_url?: string // Added for Vercel Blob integration
-  status: "processing" | "indexed" | "failed" // FIXED: Removed "created" status
+  status: "processing" | "indexed" | "failed"
   processing_progress?: number
   error_message?: string
   created_at: string
@@ -127,4 +128,5 @@ export interface Message {
   content: string
   created_at: string
   sources?: string[]
+  metadata?: Record<string, any>
 }

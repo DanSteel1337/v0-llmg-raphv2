@@ -1,12 +1,23 @@
 /**
  * Document File API Route
  *
- * API endpoint for retrieving document files from Vercel Blob Storage.
- * Handles both legacy path-based requests and direct blob URLs.
- *
+ * API endpoint for retrieving document files from storage.
+ * Handles both Vercel Blob storage paths and legacy file paths.
+ * Provides fallback content for testing when files aren't found.
+ * 
+ * Features:
+ * - Support for Vercel Blob storage URLs
+ * - Legacy path-based file retrieval
+ * - Fallback content generation
+ * - Proper error handling
+ * - HTTP redirects to blob storage
+ * 
  * Dependencies:
  * - @/utils/errorHandling for error handling
  * - @/lib/utils/logger for logging
+ * - @vercel/blob for blob storage access
+ * 
+ * @module app/api/documents/file/route
  */
 
 import type { NextRequest } from "next/server"
@@ -17,6 +28,10 @@ import { get } from "@vercel/blob"
 
 export const runtime = "edge"
 
+/**
+ * GET handler for document file retrieval
+ * Supports path-based and blob URL-based file access
+ */
 export const GET = withErrorHandling(async (request: NextRequest) => {
   const { searchParams } = new URL(request.url)
   const path = searchParams.get("path")

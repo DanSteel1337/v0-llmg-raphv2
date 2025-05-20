@@ -1,15 +1,24 @@
 /**
- * Document API Route - Delete Document
+ * Document API Route - Document Operations
  *
- * Handles deletion of documents and their associated vectors and blob files.
- * This route is Edge-compatible and works with Vercel's serverless environment.
- *
+ * Handles operations on individual documents including deletion.
+ * Provides endpoints for document management with proper error handling
+ * and cleanup of associated resources.
+ * 
+ * Features:
+ * - Document deletion with cleanup
+ * - Associated blob storage cleanup
+ * - Vector data removal from Pinecone
+ * - Proper error handling and logging
+ * 
  * Dependencies:
  * - @/utils/errorHandling for consistent error handling
  * - @/utils/apiRequest for standardized API responses
  * - @/lib/document-service for document operations
  * - @/lib/utils/logger for logging
  * - @vercel/blob for blob storage operations
+ * 
+ * @module app/api/documents/[id]/route
  */
 
 import type { NextRequest } from "next/server"
@@ -21,6 +30,10 @@ import { del, list } from "@vercel/blob"
 
 export const runtime = "edge"
 
+/**
+ * DELETE handler for document deletion
+ * Removes the document, associated vectors, and blob files
+ */
 export const DELETE = withErrorHandling(async (request: NextRequest, { params }: { params: { id: string } }) => {
   return handleApiRequest(async () => {
     const documentId = params.id

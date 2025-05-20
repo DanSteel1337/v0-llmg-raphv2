@@ -1,14 +1,22 @@
 /**
  * Document Processing API Route
  *
- * Handles document processing requests, including text extraction, chunking, and embedding generation.
- * This route is Edge-compatible and works with Vercel's serverless environment.
- *
+ * Handles document processing requests, including text extraction, chunking, 
+ * and embedding generation. Initiates asynchronous processing of document content.
+ * 
+ * Features:
+ * - Document content extraction and processing
+ * - Asynchronous processing with status updates
+ * - Validation of required parameters
+ * - Proper error handling and logging
+ * 
  * Dependencies:
  * - @/utils/errorHandling for consistent error handling
  * - @/utils/apiRequest for standardized API responses
  * - @/lib/document-service for document operations
  * - @/lib/utils/logger for logging
+ * 
+ * @module app/api/documents/process/route
  */
 
 import type { NextRequest } from "next/server"
@@ -19,6 +27,10 @@ import { logger } from "@/lib/utils/logger"
 
 export const runtime = "edge"
 
+/**
+ * POST handler for document processing
+ * Validates inputs and triggers asynchronous document processing
+ */
 export const POST = withErrorHandling(async (request: NextRequest) => {
   return handleApiRequest(async () => {
     const body = await request.json()

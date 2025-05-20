@@ -2,14 +2,24 @@
  * Document Upload API Route
  *
  * Handles file uploads via FormData and stores them in Vercel Blob Storage.
- * This route is Edge-compatible and works with Vercel's serverless environment.
- *
+ * Provides a secure and efficient way to upload document files with proper
+ * validation and error handling.
+ * 
+ * Features:
+ * - File upload with formdata
+ * - Vercel Blob storage integration
+ * - Structured error handling
+ * - Validation of required fields
+ * - Secure random filename generation
+ * 
  * Dependencies:
  * - @/utils/errorHandling for consistent error handling
  * - @/utils/apiRequest for standardized API responses
  * - @/utils/validation for input validation
  * - @/lib/utils/logger for logging
  * - @vercel/blob for blob storage operations
+ * 
+ * @module app/api/documents/upload/route
  */
 
 import type { NextRequest } from "next/server"
@@ -21,6 +31,10 @@ import { put } from "@vercel/blob"
 
 export const runtime = "edge"
 
+/**
+ * POST handler for document uploads
+ * Stores uploaded file in Vercel Blob and returns the URL
+ */
 export const POST = withErrorHandling(async (request: NextRequest) => {
   return handleApiRequest(async () => {
     try {

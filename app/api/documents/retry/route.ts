@@ -2,13 +2,21 @@
  * Document Retry Processing API Route
  *
  * Handles retrying document processing for failed documents.
- * This route is Edge-compatible and works with Vercel's serverless environment.
- *
+ * Provides functionality to retry processing when initial processing fails.
+ * 
+ * Features:
+ * - Retry processing for failed documents
+ * - Status tracking and updates
+ * - Support for both blob-based and legacy path-based documents
+ * - Proper error handling and recovery
+ * 
  * Dependencies:
  * - @/utils/errorHandling for consistent error handling
  * - @/utils/apiRequest for standardized API responses
  * - @/lib/document-service for document operations
  * - @/lib/utils/logger for logging
+ * 
+ * @module app/api/documents/retry/route
  */
 
 import type { NextRequest } from "next/server"
@@ -19,6 +27,10 @@ import { logger } from "@/lib/utils/logger"
 
 export const runtime = "edge"
 
+/**
+ * POST handler for retrying document processing
+ * Resets document processing state and triggers reprocessing
+ */
 export const POST = withErrorHandling(async (request: NextRequest) => {
   return handleApiRequest(async () => {
     const body = await request.json()

@@ -3,10 +3,19 @@
  *
  * React hook for managing documents in the Vector RAG application.
  * Provides functionality for fetching, uploading, deleting, and retrying document processing.
- *
+ * 
+ * Features:
+ * - Document listing with automatic updating
+ * - Document upload with progress tracking
+ * - Document deletion with error handling
+ * - Processing retry for failed documents
+ * 
  * Dependencies:
  * - @/services/client-api-service for API interactions
- * - @/types for document types
+ * - @/hooks/use-auth for user session information
+ * - @/types for document interfaces
+ * 
+ * @module hooks/use-documents
  */
 
 "use client"
@@ -16,6 +25,10 @@ import { useAuth } from "./use-auth"
 import { fetchDocuments, uploadDocument, deleteDocument, retryDocumentProcessing } from "@/services/client-api-service"
 import type { Document } from "@/types"
 
+/**
+ * Hook for document management functionality
+ * @returns Document management methods and state
+ */
 export function useDocuments() {
   const { user } = useAuth()
   const [documents, setDocuments] = useState<Document[]>([])
@@ -47,7 +60,12 @@ export function useDocuments() {
     loadDocuments()
   }, [user?.id])
 
-  // Upload a document
+  /**
+   * Upload a document with progress tracking
+   * @param file File to upload
+   * @param onProgress Optional progress callback function
+   * @returns The created document
+   */
   const handleUploadDocument = useCallback(
     async (file: File, onProgress?: (progress: number) => void) => {
       if (!user?.id) {
@@ -69,7 +87,11 @@ export function useDocuments() {
     [user?.id],
   )
 
-  // Delete a document
+  /**
+   * Delete a document by ID
+   * @param documentId Document ID to delete
+   * @returns True if deletion was successful
+   */
   const handleDeleteDocument = useCallback(
     async (documentId: string) => {
       if (!user?.id) {
@@ -77,14 +99,12 @@ export function useDocuments() {
       }
 
       try {
-        const success = await deleteDocument(documentId)
+        await deleteDocument(documentId)
 
-        if (success) {
-          // Remove the deleted document from the state
-          setDocuments((prevDocs) => prevDocs.filter((doc) => doc.id !== documentId))
-        }
+        // Remove the deleted document from the state
+        setDocuments((prevDocs) => prevDocs.filter((doc) => doc.id !== documentId))
 
-        return success
+        return true
       } catch (err) {
         console.error("Error deleting document:", err)
         throw err
@@ -93,7 +113,11 @@ export function useDocuments() {
     [user?.id],
   )
 
-  // Retry processing a failed document
+  /**
+   * Retry processing a failed document
+   * @param documentId Document ID to retry processing for
+   * @returns True if retry was successful
+   */
   const handleRetryProcessing = useCallback(
     async (documentId: string) => {
       if (!user?.id) {
@@ -101,20 +125,18 @@ export function useDocuments() {
       }
 
       try {
-        const success = await retryDocumentProcessing(documentId)
+        await retryDocumentProcessing(documentId)
 
-        if (success) {
-          // Update the document status in the state
-          setDocuments((prevDocs) =>
-            prevDocs.map((doc) =>
-              doc.id === documentId
-                ? { ...doc, status: "processing", processing_progress: 0, error_message: undefined }
-                : doc,
-            ),
-          )
-        }
+        // Update the document status in the state
+        setDocuments((prevDocs) =>
+          prevDocs.map((doc) =>
+            doc.id === documentId
+              ? { ...doc, status: "processing", processing_progress: 0, error_message: undefined }
+              : doc,
+          ),
+        )
 
-        return success
+        return true
       } catch (err) {
         console.error("Error retrying document processing:", err)
         throw err
@@ -123,15 +145,19 @@ export function useDocuments() {
     [user?.id],
   )
 
-  // Refresh documents
+  /**
+   * Refresh documents from the API
+   * @returns The fetched documents
+   */
   const handleRefreshDocuments = useCallback(async () => {
     if (!user?.id) {
-      return
+      return []
     }
 
     try {
       const docs = await fetchDocuments(user.id)
       setDocuments(docs)
+      return docs
     } catch (err) {
       console.error("Error refreshing documents:", err)
       throw err

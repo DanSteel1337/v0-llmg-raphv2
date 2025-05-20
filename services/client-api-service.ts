@@ -1,12 +1,21 @@
 /**
  * Client API Service
  *
- * Service layer for client-side API interactions.
- * Handles HTTP requests to the API endpoints.
- *
+ * Service layer for client-side API interactions with the backend.
+ * Provides standardized methods for handling HTTP requests to all API endpoints.
+ * 
+ * Features:
+ * - Document management (upload, retrieve, delete)
+ * - Chat conversations and messages
+ * - Search functionality
+ * - Analytics data retrieval
+ * - Health checks
+ * 
  * Dependencies:
- * - @/types for type definitions
- * - @/services/apiCall for standardized API requests
+ * - apiCall utility for standardized request handling
+ * - Type definitions for proper type safety
+ * 
+ * @module services/client-api-service
  */
 
 import { apiCall } from "./apiCall"
@@ -26,9 +35,11 @@ export async function fetchDocuments(userId: string): Promise<Document[]> {
     }
 
     console.log(`Fetching documents for user ${userId}`)
-    const response = await apiCall<{ documents: Document[] }>(`/api/documents?userId=${encodeURIComponent(userId)}`)
+    const response = await apiCall<{ success: boolean; documents: Document[] }>(
+      `/api/documents?userId=${encodeURIComponent(userId)}`,
+    )
 
-    if (!response || !response.documents) {
+    if (!response || !response.success || !response.documents) {
       console.warn("Received invalid response from documents API", { response })
       return []
     }
@@ -36,7 +47,7 @@ export async function fetchDocuments(userId: string): Promise<Document[]> {
     return Array.isArray(response.documents) ? response.documents : []
   } catch (error) {
     console.error("Error fetching documents:", error)
-    return []
+    throw error
   }
 }
 
@@ -66,7 +77,7 @@ export async function uploadDocument(
       fileSize: file.size,
     })
 
-    const createResponse = await apiCall<{ document: Document }>("/api/documents", {
+    const createResponse = await apiCall<{ success: boolean; document: Document }>("/api/documents", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -79,7 +90,7 @@ export async function uploadDocument(
     })
 
     // Validate document response
-    if (!createResponse || !createResponse.document?.id || !createResponse.document?.file_path) {
+    if (!createResponse.success || !createResponse.document?.id || !createResponse.document?.file_path) {
       console.error("Document creation failed - missing fields:", createResponse)
       throw new Error("Document creation failed: Missing document ID or file path")
     }
@@ -103,6 +114,7 @@ export async function uploadDocument(
     formData.append("filePath", document.file_path)
 
     const uploadResponse = await apiCall<{
+      success: boolean
       fileUrl: string
       blobUrl?: string
     }>("/api/documents/upload", {
@@ -110,9 +122,9 @@ export async function uploadDocument(
       body: formData,
     })
 
-    if (!uploadResponse || (!uploadResponse.fileUrl && !uploadResponse.blobUrl)) {
+    if (!uploadResponse.success) {
       console.error("File upload failed:", uploadResponse)
-      throw new Error("File upload failed: No file URL returned")
+      throw new Error("File upload failed")
     }
 
     // Prioritize blobUrl if available, fall back to fileUrl
@@ -136,7 +148,7 @@ export async function uploadDocument(
     })
 
     try {
-      const processResponse = await apiCall<{ status?: string; message?: string; error?: string }>(
+      const processResponse = await apiCall<{ success: boolean; status?: string; message?: string; error?: string }>(
         "/api/documents/process",
         {
           method: "POST",
@@ -155,20 +167,17 @@ export async function uploadDocument(
       // Log the full response for debugging
       console.log("Document processing response:", processResponse)
 
-      // Check for error in response
-      if (processResponse?.error) {
-        console.error("Document processing failed to start:", {
-          error: processResponse.error,
-          response: processResponse,
-        })
-        throw new Error(`Failed to start document processing: ${processResponse.error}`)
+      if (!processResponse || processResponse.success !== true) {
+        const errorMessage = processResponse?.error || "Unknown error"
+        console.error("Document processing failed to start:", { error: errorMessage, response: processResponse })
+        throw new Error(`Failed to start document processing: ${errorMessage}`)
       }
 
       console.log("Document processing triggered:", {
         documentId: document.id,
         filePath: document.file_path,
         fileUrl,
-        status: processResponse?.status || "processing",
+        status: processResponse.status || "processing",
       })
     } catch (processError) {
       console.error("Error triggering document processing:", processError)
@@ -225,22 +234,15 @@ export async function uploadDocument(
  * @param id Document ID to delete
  * @returns Success indicator
  */
-export async function deleteDocument(id: string): Promise<boolean> {
+export async function deleteDocument(id: string): Promise<{ success: boolean }> {
   if (!id) {
     console.error("deleteDocument called without documentId")
     throw new Error("Document ID is required")
   }
 
-  try {
-    const response = await apiCall<{ success?: boolean }>(`/api/documents/${encodeURIComponent(id)}`, {
-      method: "DELETE",
-    })
-
-    return response?.success === true
-  } catch (error) {
-    console.error("Error deleting document:", error)
-    throw error
-  }
+  return await apiCall<{ success: boolean }>(`/api/documents/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  })
 }
 
 /**
@@ -249,24 +251,17 @@ export async function deleteDocument(id: string): Promise<boolean> {
  * @param documentId Document ID to retry processing for
  * @returns Success indicator
  */
-export async function retryDocumentProcessing(documentId: string): Promise<boolean> {
+export async function retryDocumentProcessing(documentId: string): Promise<{ success: boolean }> {
   if (!documentId) {
     console.error("retryDocumentProcessing called without documentId")
     throw new Error("Document ID is required")
   }
 
-  try {
-    const response = await apiCall<{ success?: boolean }>("/api/documents/retry", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ documentId }),
-    })
-
-    return response?.success === true
-  } catch (error) {
-    console.error("Error retrying document processing:", error)
-    throw error
-  }
+  return await apiCall<{ success: boolean }>("/api/documents/retry", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ documentId }),
+  })
 }
 
 /**
@@ -280,41 +275,29 @@ export async function fetchAnalytics(userId: string, timeframe?: string): Promis
   try {
     if (!userId) {
       console.error("fetchAnalytics called without userId")
-      return {
-        documentCount: 0,
-        chunkCount: 0,
-        searchCount: 0,
-        chatCount: 0,
-        topDocuments: [],
-        topSearches: [],
+      return { 
+        documentCount: 0, 
+        chunkCount: 0, 
+        searchCount: 0, 
+        chatCount: 0, 
+        topDocuments: [], 
+        topSearches: [] 
       }
     }
 
     const url = `/api/analytics?userId=${encodeURIComponent(userId)}${timeframe ? `&timeframe=${timeframe}` : ""}`
-    const response = await apiCall<{ data: AnalyticsData }>(url)
+    const response = await apiCall<AnalyticsData>(url)
 
-    if (!response || !response.data) {
-      console.warn("Received invalid response from analytics API", { response })
-      return {
-        documentCount: 0,
-        chunkCount: 0,
-        searchCount: 0,
-        chatCount: 0,
-        topDocuments: [],
-        topSearches: [],
-      }
-    }
-
-    return response.data
+    return response
   } catch (error) {
     console.error("Error fetching analytics:", error)
-    return {
-      documentCount: 0,
-      chunkCount: 0,
-      searchCount: 0,
-      chatCount: 0,
-      topDocuments: [],
-      topSearches: [],
+    return { 
+      documentCount: 0, 
+      chunkCount: 0, 
+      searchCount: 0, 
+      chatCount: 0, 
+      topDocuments: [], 
+      topSearches: [] 
     }
   }
 }
@@ -322,27 +305,42 @@ export async function fetchAnalytics(userId: string, timeframe?: string): Promis
 /**
  * Check API health
  *
- * @returns Health status
+ * @returns Health status object with service health indicators
  */
-export async function checkApiHealth(): Promise<{ status: string; services: Record<string, boolean> }> {
+export async function checkApiHealth(): Promise<{ 
+  pineconeApiHealthy: boolean | null; 
+  openaiApiHealthy: boolean | null; 
+  errors?: { 
+    pinecone?: string | null; 
+    openai?: string | null; 
+  } 
+}> {
   try {
     const response = await apiCall<{
-      status: string
-      services: Record<string, boolean>
+      success: boolean;
+      status: string;
+      services: Record<string, boolean>;
+      errors: {
+        pinecone: string | null;
+        openai: string | null;
+      }
     }>("/api/health")
 
-    if (!response) {
-      console.warn("Received invalid response from health API", { response })
-      return { status: "error", services: {} }
-    }
-
     return {
-      status: response.status || "unknown",
-      services: response.services || {},
+      pineconeApiHealthy: response?.services?.pinecone ?? null,
+      openaiApiHealthy: response?.services?.openai ?? null,
+      errors: response?.errors
     }
   } catch (error) {
     console.error("Error checking API health:", error)
-    return { status: "error", services: {} }
+    return { 
+      pineconeApiHealthy: false, 
+      openaiApiHealthy: false,
+      errors: {
+        pinecone: error instanceof Error ? error.message : "Unknown error",
+        openai: "Connection failed"
+      }
+    }
   }
 }
 
@@ -359,11 +357,11 @@ export async function fetchConversations(userId: string): Promise<Conversation[]
       return []
     }
 
-    const response = await apiCall<{ conversations: Conversation[] }>(
+    const response = await apiCall<{ success: boolean; conversations: Conversation[] }>(
       `/api/conversations?userId=${encodeURIComponent(userId)}`,
     )
 
-    if (!response || !response.conversations) {
+    if (!response || !response.success || !response.conversations) {
       console.warn("Received invalid response from conversations API", { response })
       return []
     }
@@ -389,7 +387,7 @@ export async function createConversation(userId: string, title?: string): Promis
       throw new Error("User ID is required")
     }
 
-    const response = await apiCall<{ conversation: Conversation }>("/api/conversations", {
+    const response = await apiCall<{ success: boolean; conversation: Conversation }>("/api/conversations", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -398,7 +396,7 @@ export async function createConversation(userId: string, title?: string): Promis
       }),
     })
 
-    if (!response || !response.conversation) {
+    if (!response || !response.success || !response.conversation) {
       console.warn("Received invalid response from create conversation API", { response })
       return null
     }
@@ -423,11 +421,11 @@ export async function fetchMessages(conversationId: string): Promise<Message[]> 
       return []
     }
 
-    const response = await apiCall<{ messages: Message[] }>(
+    const response = await apiCall<{ success: boolean; messages: Message[] }>(
       `/api/chat/messages?conversationId=${encodeURIComponent(conversationId)}`,
     )
 
-    if (!response || !response.messages) {
+    if (!response || !response.success || !response.messages) {
       console.warn("Received invalid response from messages API", { response })
       return []
     }
@@ -443,80 +441,38 @@ export async function fetchMessages(conversationId: string): Promise<Message[]> 
  * Send a message in a conversation
  *
  * @param conversationId Conversation ID to send message in
- * @param userId User ID who is sending the message
  * @param content Message content
- * @param onChunk Optional callback for streaming responses
- * @returns Created message
+ * @param userId User ID sending the message
+ * @returns The AI message response
  */
 export async function sendMessage(
   conversationId: string,
-  userId: string,
   content: string,
-  onChunk?: (chunk: string) => void,
+  userId: string
 ): Promise<Message | null> {
   try {
     if (!conversationId) throw new Error("Conversation ID is required")
     if (!userId) throw new Error("User ID is required")
-    if (!content) throw new Error("Message content is required")
-
-    // If no streaming callback, use regular API call
-    if (!onChunk) {
-      const response = await apiCall<{ message: Message }>("/api/chat/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          conversationId,
-          userId,
-          content,
-        }),
-      })
-
-      if (!response || !response.message) {
-        console.warn("Received invalid response from send message API", { response })
-        return null
-      }
-
-      return response.message
+    if (!content || typeof content !== "string" || content.trim() === "") {
+      throw new Error("Message content cannot be empty")
     }
 
-    // Handle streaming response
-    const response = await fetch("/api/chat/messages", {
+    const response = await apiCall<{ success: boolean; message: Message }>("/api/chat/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         conversationId,
         userId,
         content,
-        stream: true,
       }),
     })
 
-    if (!response.ok || !response.body) {
-      throw new Error(`Failed to send message: ${response.status}`)
+    if (!response || !response.success || !response.message) {
+      console.warn("Received invalid response from send message API", { response })
+      return null
     }
 
-    // Process the stream
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder()
-    let accumulatedContent = ""
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-
-      const chunk = decoder.decode(value, { stream: true })
-      accumulatedContent += chunk
-      onChunk(chunk)
-    }
-
-    // Return a synthetic message object
-    return {
-      id: `temp-${Date.now()}`,
-      conversation_id: conversationId,
-      role: "assistant",
-      content: accumulatedContent,
-      created_at: new Date().toISOString(),
-    }
+    return response.message
   } catch (error) {
     console.error("Error sending message:", error)
     throw error
@@ -531,39 +487,53 @@ export async function sendMessage(
  * @param options Optional search options
  * @returns Search results
  */
-export async function performSearch(userId: string, query: string, options?: SearchOptions): Promise<SearchResult[]> {
+export async function performSearch(
+  userId: string,
+  query: string,
+  options: SearchOptions = { type: "semantic" }
+): Promise<SearchResult[]> {
   try {
     if (!userId) throw new Error("User ID is required")
     if (!query) throw new Error("Search query is required")
 
+    // Build search parameters
     const searchParams = new URLSearchParams({
       userId,
-      query,
+      q: query,
     })
 
-    // Add any options to the search params
-    if (options) {
-      if (options.type) searchParams.append("type", options.type)
+    // Add type parameter
+    if (options.type) {
+      searchParams.append("type", options.type)
+    }
 
-      if (options.documentTypes && options.documentTypes.length > 0) {
-        searchParams.append("documentTypes", options.documentTypes.join(","))
+    // Add document type filters if present
+    if (options.documentTypes && Array.isArray(options.documentTypes)) {
+      options.documentTypes.forEach(type => {
+        searchParams.append("documentType", type)
+      })
+    }
+
+    // Add sort option if present
+    if (options.sortBy) {
+      searchParams.append("sortBy", options.sortBy)
+    }
+
+    // Add date range if present
+    if (options.dateRange) {
+      if (options.dateRange.from) {
+        searchParams.append("from", options.dateRange.from.toISOString())
       }
-
-      if (options.sortBy) searchParams.append("sortBy", options.sortBy)
-
-      if (options.dateRange) {
-        if (options.dateRange.from) {
-          searchParams.append("from", options.dateRange.from.toISOString())
-        }
-        if (options.dateRange.to) {
-          searchParams.append("to", options.dateRange.to.toISOString())
-        }
+      if (options.dateRange.to) {
+        searchParams.append("to", options.dateRange.to.toISOString())
       }
     }
 
-    const response = await apiCall<{ results: SearchResult[] }>(`/api/search?${searchParams.toString()}`)
+    const response = await apiCall<{ success: boolean; results: SearchResult[] }>(
+      `/api/search?${searchParams.toString()}`
+    )
 
-    if (!response || !response.results) {
+    if (!response || !response.success) {
       console.warn("Received invalid response from search API", { response })
       return []
     }
@@ -571,6 +541,6 @@ export async function performSearch(userId: string, query: string, options?: Sea
     return Array.isArray(response.results) ? response.results : []
   } catch (error) {
     console.error("Error performing search:", error)
-    return []
+    throw error
   }
 }
