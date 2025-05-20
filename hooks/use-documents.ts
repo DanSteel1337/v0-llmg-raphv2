@@ -1,24 +1,51 @@
-// hooks/use-documents.ts
+/**
+ * Documents Hook
+ *
+ * Custom hook for managing document operations.
+ * Provides functionality for fetching, uploading, deleting, and processing documents.
+ *
+ * Features:
+ * - Document listing and filtering
+ * - Document upload with progress tracking
+ * - Document deletion
+ * - Processing retry for failed documents
+ * - Automatic refresh of document list
+ *
+ * Dependencies:
+ * - @/services/client-api-service for backend communication
+ * - @/types for document type definitions
+ *
+ * @module hooks/use-documents
+ */
+
 "use client"
 
-import { useState, useCallback, useEffect } from "react"
-import { useAuth } from "@/hooks/use-auth"
+import { useState, useEffect, useCallback } from "react"
 import {
-  fetchDocuments as fetchDocumentsApi,
-  uploadDocument as uploadDocumentApi,
-  deleteDocument as deleteDocumentApi,
-  retryDocumentProcessing as retryDocumentProcessingApi,
+  fetchDocuments as apiFetchDocuments,
+  uploadDocument as apiUploadDocument,
+  deleteDocument as apiDeleteDocument,
+  retryDocumentProcessing,
 } from "@/services/client-api-service"
 import type { Document } from "@/types"
+import { useToastAdapter } from "@/components/toast-adapter"
 
-export function useDocuments() {
-  const { user } = useAuth()
+/**
+ * Hook for document management functionality
+ * @param userId User ID for the current user
+ * @returns Document state and methods
+ */
+export function useDocuments(userId?: string) {
   const [documents, setDocuments] = useState<Document[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const { toast } = useToastAdapter()
 
+  /**
+   * Fetch documents from the API
+   */
   const fetchDocuments = useCallback(async () => {
-    if (!user?.id) {
+    if (!userId) {
       setDocuments([])
       setIsLoading(false)
       return
@@ -27,64 +54,74 @@ export function useDocuments() {
     try {
       setIsLoading(true)
       setError(null)
-      const docs = await fetchDocumentsApi(user.id)
+      const docs = await apiFetchDocuments(userId)
       setDocuments(docs)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to fetch documents")
       console.error("Error fetching documents:", err)
+      setError(err instanceof Error ? err.message : "Failed to load documents")
     } finally {
       setIsLoading(false)
     }
-  }, [user?.id])
+  }, [userId])
 
+  /**
+   * Upload a document
+   * @param file File to upload
+   * @returns Uploaded document
+   */
   const uploadDocument = useCallback(
     async (file: File): Promise<Document> => {
-      if (!user?.id) {
-        throw new Error("User not authenticated")
+      if (!userId) {
+        throw new Error("User ID is required to upload a document")
       }
 
       try {
-        // Don't pass a callback - we'll track progress using the document state
-        const document = await uploadDocumentApi(user.id, file)
-
-        // Refresh the documents list to include the new document
-        fetchDocuments()
-
+        const document = await apiUploadDocument(userId, file)
+        await fetchDocuments() // Refresh the document list
         return document
-      } catch (err) {
-        console.error("Error uploading document:", err)
-        throw err
+      } catch (error) {
+        console.error("Error uploading document:", error)
+        throw error
       }
     },
-    [user?.id, fetchDocuments],
+    [userId, fetchDocuments],
   )
 
-  const deleteDocument = useCallback(async (documentId: string): Promise<void> => {
-    try {
-      await deleteDocumentApi(documentId)
-      // Update local state to remove the deleted document
-      setDocuments((prevDocs) => prevDocs.filter((doc) => doc.id !== documentId))
-    } catch (err) {
-      console.error("Error deleting document:", err)
-      throw err
-    }
-  }, [])
-
-  const retryProcessing = useCallback(
-    async (documentId: string): Promise<void> => {
+  /**
+   * Delete a document
+   * @param documentId Document ID to delete
+   */
+  const deleteDocument = useCallback(
+    async (documentId: string) => {
       try {
-        await retryDocumentProcessingApi(documentId)
-        // Refresh documents to get updated status
-        fetchDocuments()
-      } catch (err) {
-        console.error("Error retrying document processing:", err)
-        throw err
+        await apiDeleteDocument(documentId)
+        await fetchDocuments() // Refresh the document list
+      } catch (error) {
+        console.error("Error deleting document:", error)
+        throw error
       }
     },
     [fetchDocuments],
   )
 
-  // Fetch documents on mount and when user changes
+  /**
+   * Retry processing a failed document
+   * @param documentId Document ID to retry
+   */
+  const retryProcessing = useCallback(
+    async (documentId: string) => {
+      try {
+        await retryDocumentProcessing(documentId)
+        await fetchDocuments() // Refresh the document list
+      } catch (error) {
+        console.error("Error retrying document processing:", error)
+        throw error
+      }
+    },
+    [fetchDocuments],
+  )
+
+  // Initial fetch on mount
   useEffect(() => {
     fetchDocuments()
   }, [fetchDocuments])

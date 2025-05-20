@@ -2,30 +2,29 @@
  * Search Hook
  *
  * Custom hook for performing searches and managing search results.
- * Provides functionality for semantic, keyword, and hybrid search,
- * as well as tracking recent searches.
+ * Provides functionality for executing searches with various options
+ * and handling the search lifecycle.
  *
  * Features:
- * - Multiple search types (semantic, keyword, hybrid)
- * - Automatic recent search tracking
- * - Configurable search options
- * - Debounced search capability
- * - Error handling and loading states
- * 
+ * - Semantic and keyword search capabilities
+ * - Search history tracking
+ * - Result filtering and sorting
+ * - Loading state management
+ * - Error handling
+ *
  * Dependencies:
- * - @/hooks/use-api for API interaction
- * - @/services/client-api-service for search API
- * - @/types for search and result types
+ * - @/services/client-api-service for backend communication
+ * - @/types for search result type definitions
  *
  * @module hooks/use-search
  */
 
 "use client"
 
-import { useState, useCallback, useEffect } from "react"
-import { useApi } from "@/hooks/use-api"
-import { performSearch } from "@/services/client-api-service"
+import { useState, useCallback } from "react"
+import { performSearch as apiPerformSearch } from "@/services/client-api-service"
 import type { SearchResult, SearchOptions } from "@/types"
+import { useToastAdapter } from "@/components/toast-adapter"
 
 /**
  * Hook for search functionality
@@ -33,94 +32,72 @@ import type { SearchResult, SearchOptions } from "@/types"
  * @returns Search state and methods
  */
 export function useSearch(userId: string) {
-  const [searchOptions, setSearchOptions] = useState<SearchOptions>({
-    type: "semantic",
-  })
-  const [recentSearches, setRecentSearches] = useState<string[]>([])
-
-  // Wrap the search function with useCallback
-  const searchCallback = useCallback(
-    (query: string) => {
-      return performSearch(userId, query, searchOptions)
-    },
-    [userId, searchOptions],
-  )
-
-  const { data: results, isLoading, error, execute: executeSearch } = useApi<SearchResult[], [string]>(searchCallback)
-
-  // Load recent searches on mount
-  useEffect(() => {
-    setRecentSearches(getRecentSearches())
-  }, [])
+  const [results, setResults] = useState<SearchResult[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [searchHistory, setSearchHistory] = useState<string[]>([])
+  const { toast } = useToastAdapter()
 
   /**
-   * Save search to local storage
-   * @param query Search query to save
-   */
-  const saveSearchToHistory = (query: string) => {
-    if (typeof window !== "undefined") {
-      const searches = getRecentSearches()
-      if (!searches.includes(query)) {
-        searches.unshift(query)
-        if (searches.length > 5) searches.pop()
-        localStorage.setItem("recentSearches", JSON.stringify(searches))
-        setRecentSearches(searches)
-      }
-    }
-  }
-
-  /**
-   * Perform a search
+   * Perform a search with the given query and options
    * @param query Search query
+   * @param options Search options
    * @returns Search results
    */
-  const search = async (query: string) => {
-    if (!query || typeof query !== "string") {
-      throw new Error("Search query cannot be empty")
-    }
+  const performSearch = useCallback(
+    async (query: string, options: SearchOptions = { type: "semantic" }) => {
+      if (!query.trim()) {
+        setResults([])
+        return []
+      }
 
-    const trimmedQuery = query.trim()
-    if (!trimmedQuery) {
-      return []
-    }
+      if (!userId) {
+        setError("User ID is required to perform a search")
+        toast("User ID is required to perform a search", "error")
+        return []
+      }
 
-    if (trimmedQuery.length < 2) {
-      throw new Error("Search query must be at least 2 characters")
-    }
+      try {
+        setIsLoading(true)
+        setError(null)
 
-    try {
-      const results = await executeSearch(trimmedQuery)
-      saveSearchToHistory(trimmedQuery)
-      return results
-    } catch (error) {
-      console.error("Search error:", error)
-      throw error
-    }
-  }
+        const searchResults = await apiPerformSearch(userId, query, options)
+
+        // Update search history
+        setSearchHistory((prev) => {
+          const newHistory = [query, ...prev.filter((q) => q !== query)]
+          return newHistory.slice(0, 10) // Keep only the 10 most recent searches
+        })
+
+        setResults(searchResults)
+        return searchResults
+      } catch (err) {
+        console.error("Error performing search:", err)
+        const errorMessage = err instanceof Error ? err.message : "An error occurred during search"
+        setError(errorMessage)
+        toast("Search failed: " + errorMessage, "error")
+        return []
+      } finally {
+        setIsLoading(false)
+      }
+    },
+    [userId, toast],
+  )
 
   /**
-   * Get recent searches from local storage
-   * @returns Array of recent search queries
+   * Clear search results and history
    */
-  const getRecentSearches = (): string[] => {
-    if (typeof window === "undefined") return []
-
-    try {
-      const searches = JSON.parse(localStorage.getItem("recentSearches") || "[]")
-      return Array.isArray(searches) ? searches : []
-    } catch (error) {
-      console.error("Error parsing recent searches:", error)
-      return []
-    }
-  }
+  const clearSearch = useCallback(() => {
+    setResults([])
+    setError(null)
+  }, [])
 
   return {
-    results: results || [],
+    results,
     isLoading,
     error,
-    search,
-    setSearchOptions,
-    searchOptions,
-    recentSearches,
+    searchHistory,
+    performSearch,
+    clearSearch,
   }
 }

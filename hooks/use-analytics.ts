@@ -11,11 +11,11 @@
  * - Automatic refresh on mount
  * - Manual refresh capability
  * - Error handling and loading states
- * 
+ *
  * Dependencies:
  * - @/services/client-api-service for API calls
  * - @/types for analytics data types
- * 
+ *
  * @module hooks/use-analytics
  */
 
@@ -24,6 +24,7 @@
 import { useState, useEffect, useCallback } from "react"
 import { fetchAnalytics, checkApiHealth } from "@/services/client-api-service"
 import type { AnalyticsData } from "@/types"
+import { useToastAdapter } from "@/components/toast-adapter"
 
 /**
  * Hook for analytics functionality
@@ -41,6 +42,7 @@ export function useAnalytics(userId: string) {
     pinecone?: string | null
     openai?: string | null
   }>({})
+  const { toast } = useToastAdapter()
 
   /**
    * Load analytics data
@@ -56,10 +58,11 @@ export function useAnalytics(userId: string) {
     } catch (err) {
       console.error("Error loading analytics:", err)
       setError(err instanceof Error ? err : new Error(String(err)))
+      toast("Failed to load analytics data", "error")
     } finally {
       setIsLoading(false)
     }
-  }, [userId])
+  }, [userId, toast])
 
   /**
    * Check health of backend services
@@ -82,18 +85,21 @@ export function useAnalytics(userId: string) {
       // If there are errors, log them for debugging
       if (health.errors?.pinecone) {
         console.error("Pinecone health check error:", health.errors.pinecone)
+        toast("Pinecone API health check failed", "error")
       }
       if (health.errors?.openai) {
         console.error("OpenAI health check error:", health.errors.openai)
+        toast("OpenAI API health check failed", "error")
       }
     } catch (err) {
       console.error("Error checking API health:", err)
       setPineconeApiHealthy(false)
       setOpenaiApiHealthy(false)
+      toast("API health check failed", "error")
     } finally {
       setIsCheckingHealth(false)
     }
-  }, [])
+  }, [toast])
 
   /**
    * Refresh analytics data and check API health

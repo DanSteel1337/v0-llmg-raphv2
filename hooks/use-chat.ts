@@ -31,6 +31,7 @@ import {
   sendMessage as apiSendMessage,
 } from "@/services/client-api-service"
 import type { ChatMessage, Conversation } from "@/types"
+import { useToastAdapter } from "@/components/toast-adapter"
 
 /**
  * Hook for chat functionality
@@ -43,6 +44,7 @@ export function useChat(userId: string, initialConversationId?: string) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isTyping, setIsTyping] = useState(false)
   const [retryCount, setRetryCount] = useState(0)
+  const { toast } = useToastAdapter()
 
   // Ensure userId is valid before making any requests
   const safeUserId = userId || ""
@@ -85,6 +87,16 @@ export function useChat(userId: string, initialConversationId?: string) {
     execute: loadConversations,
   } = useApi<Conversation[], []>(fetchConversationsCallback)
 
+  // Handle errors
+  useEffect(() => {
+    if (messagesError) {
+      toast("Failed to load messages: " + messagesError, "error")
+    }
+    if (conversationsError) {
+      toast("Failed to load conversations: " + conversationsError, "error")
+    }
+  }, [messagesError, conversationsError, toast])
+
   /**
    * Create a new conversation with proper error handling
    * @param title Optional title for the conversation
@@ -110,9 +122,11 @@ export function useChat(userId: string, initialConversationId?: string) {
       console.log(`Conversation created with ID: ${conversation.id}`)
       setActiveConversationId(conversation.id)
       await loadConversations()
+      toast("Conversation created successfully", "success")
       return conversation
     } catch (error) {
       console.error(`Error creating conversation:`, error)
+      toast("Failed to create conversation", "error")
       throw error
     }
   }
@@ -126,11 +140,13 @@ export function useChat(userId: string, initialConversationId?: string) {
     // Enhanced validation
     if (!activeConversationId) {
       console.error("Cannot send message: No active conversation")
+      toast("No active conversation selected", "error")
       throw new Error("No active conversation")
     }
 
     if (!safeUserId) {
       console.error("Cannot send message: No user ID")
+      toast("User ID is required to send a message", "error")
       throw new Error("User ID is required to send a message")
     }
 
@@ -139,6 +155,7 @@ export function useChat(userId: string, initialConversationId?: string) {
         contentType: typeof content,
         contentLength: typeof content === "string" ? content.length : 0,
       })
+      toast("Message content cannot be empty", "error")
       throw new Error("Message content cannot be empty")
     }
 
@@ -167,7 +184,7 @@ export function useChat(userId: string, initialConversationId?: string) {
       setMessages((prev) => [...prev, tempUserMessage])
 
       const response = await apiSendMessage(activeConversationId, content, safeUserId)
-      
+
       // Reload messages to get the new message and response
       await loadMessages()
       setRetryCount(0) // Reset retry count on success
@@ -189,6 +206,7 @@ export function useChat(userId: string, initialConversationId?: string) {
         return sendMessage(content)
       }
 
+      toast("Failed to send message", "error")
       throw error
     } finally {
       setIsTyping(false)
