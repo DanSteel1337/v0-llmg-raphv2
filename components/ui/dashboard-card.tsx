@@ -7,9 +7,8 @@ interface DashboardCardProps extends React.HTMLAttributes<HTMLDivElement> {
   description?: React.ReactNode
   footer?: React.ReactNode
   isLoading?: boolean
-  className?: string
-  contentClassName?: string
   headerClassName?: string
+  contentClassName?: string
   footerClassName?: string
 }
 
@@ -18,10 +17,10 @@ export function DashboardCard({
   description,
   footer,
   children,
-  isLoading,
+  isLoading = false,
   className,
-  contentClassName,
   headerClassName,
+  contentClassName,
   footerClassName,
   ...props
 }: DashboardCardProps) {
@@ -35,10 +34,10 @@ export function DashboardCard({
           </div>
         </CardHeader>
       )}
-      <CardContent className={cn("px-6 pt-2", contentClassName)}>
+      <CardContent className={cn("px-6", contentClassName)}>
         {isLoading ? (
           <div className="flex h-[200px] items-center justify-center">
-            <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600" />
+            <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-t-2 border-gray-900"></div>
           </div>
         ) : (
           children

@@ -23,15 +23,31 @@ export interface Document {
   file_size: number
   file_path: string
   blob_url?: string // Added for Vercel Blob integration
-  status: "processing" | "indexed" | "failed"
+  status: DocumentStatus
   processing_progress?: number
+  processing_step?: ProcessingStep // Added for detailed progress tracking
   error_message?: string
   created_at: string
   updated_at: string
   chunk_count?: number
+  token_count?: number
   embedding_model?: string
   debug_info?: Record<string, any>
 }
+
+// Document processing step
+export type ProcessingStep =
+  | "initializing"
+  | "reading_file"
+  | "chunking"
+  | "embedding"
+  | "indexing"
+  | "finalizing"
+  | "completed"
+  | "failed"
+
+// Document status
+export type DocumentStatus = "processing" | "indexed" | "failed"
 
 // Document processing options
 export interface ProcessDocumentOptions {

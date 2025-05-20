@@ -4,12 +4,13 @@
 import type React from "react"
 
 import { useState, useCallback, useRef, useEffect } from "react"
-import { Trash2, Upload, RefreshCw, AlertCircle, FileText, CheckCircle, Clock } from "lucide-react"
+import { Trash2, Upload, RefreshCw, AlertCircle, FileText, CheckCircle, Clock, Loader2 } from "lucide-react"
 import { DashboardCard } from "@/components/ui/dashboard-card"
 import { formatFileSize, formatDate } from "@/utils/formatting"
 import { useToast } from "@/components/toast"
 import { useDocuments } from "@/hooks/use-documents"
-import type { Document } from "@/types"
+import { getProcessingStepDescription } from "@/services/client-api-service"
+import type { Document, ProcessingStep } from "@/types"
 
 interface DocumentWidgetProps {
   userId: string
@@ -21,6 +22,7 @@ export function DocumentWidget({ userId }: DocumentWidgetProps) {
   const { toast } = useToast()
   const [isUploading, setIsUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
+  const [currentStep, setCurrentStep] = useState<ProcessingStep | undefined>(undefined)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [stalledDocuments, setStalledDocuments] = useState<Set<string>>(new Set())
 
@@ -78,11 +80,18 @@ export function DocumentWidget({ userId }: DocumentWidgetProps) {
 
       setIsUploading(true)
       setUploadProgress(0)
+      setCurrentStep(undefined)
 
       try {
-        await uploadDocument(file, (progress) => {
+        // Create a stable progress callback that's bound to this component instance
+        const updateProgress = (progress: number, step?: ProcessingStep) => {
           setUploadProgress(progress)
-        })
+          if (step) {
+            setCurrentStep(step)
+          }
+        }
+
+        await uploadDocument(file, updateProgress)
 
         toast({
           title: "Document uploaded",
@@ -97,7 +106,6 @@ export function DocumentWidget({ userId }: DocumentWidgetProps) {
         })
       } finally {
         setIsUploading(false)
-        setUploadProgress(0)
         if (fileInputRef.current) {
           fileInputRef.current.value = ""
         }
@@ -152,35 +160,49 @@ export function DocumentWidget({ userId }: DocumentWidgetProps) {
     window.open(fileUrl, "_blank")
   }, [])
 
+  // Function to get step color based on processing step
+  const getStepColor = (step?: ProcessingStep) => {
+    switch (step) {
+      case "failed":
+        return "text-red-600"
+      case "completed":
+        return "text-green-600"
+      default:
+        return "text-blue-600"
+    }
+  }
+
   return (
     <DashboardCard title="Documents" description="Upload and manage your documents">
       <div className="mb-4">
         <div className="flex items-center gap-2">
-          <button 
-            onClick={() => fileInputRef.current?.click()} 
-            disabled={isUploading} 
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isUploading}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
           >
             <Upload className="h-4 w-4" />
             Upload Document
           </button>
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleFileChange}
-            className="hidden"
-            accept=".txt,.md,.csv"
-          />
+          <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept=".txt,.md,.csv" />
         </div>
         {isUploading && (
           <div className="mt-2">
             <div className="w-full bg-gray-200 rounded-full h-2.5">
-              <div 
-                className="bg-blue-600 h-2.5 rounded-full" 
-                style={{ width: `${uploadProgress}%` }}
-              ></div>
+              <div className="bg-blue-600 h-2.5 rounded-full" style={{ width: `${uploadProgress}%` }}></div>
             </div>
-            <p className="mt-1 text-xs text-gray-500">Uploading and processing: {uploadProgress}%</p>
+            <div className="mt-1 flex items-center justify-between">
+              <p className="text-xs text-gray-500">
+                <span className={getStepColor(currentStep)}>
+                  {currentStep ? getProcessingStepDescription(currentStep) : "Uploading document"}
+                </span>{" "}
+                ({uploadProgress}%)
+              </p>
+              <div className="flex items-center text-xs text-gray-500">
+                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                Processing...
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -246,12 +268,18 @@ export function DocumentWidget({ userId }: DocumentWidgetProps) {
                     )}
                   </div>
                 </div>
-                {doc.status === "processing" && doc.processing_progress !== undefined && (
-                  <div className="w-full bg-gray-200 h-1">
-                    <div 
-                      className="bg-blue-600 h-1" 
-                      style={{ width: `${doc.processing_progress}%` }}
-                    ></div>
+                {doc.status === "processing" && (
+                  <div>
+                    <div className="w-full bg-gray-200 h-1">
+                      <div className="bg-blue-600 h-1" style={{ width: `${doc.processing_progress || 0}%` }}></div>
+                    </div>
+                    {doc.processing_step && (
+                      <div className="px-4 py-1 text-xs text-gray-600 bg-gray-50">
+                        <span className={getStepColor(doc.processing_step)}>
+                          {getProcessingStepDescription(doc.processing_step)}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 )}
                 {doc.status === "failed" && doc.error_message && (
@@ -260,7 +288,7 @@ export function DocumentWidget({ userId }: DocumentWidgetProps) {
                   </div>
                 )}
                 <div className="p-2 flex justify-between items-center">
-                  <button 
+                  <button
                     className="px-3 py-1 text-sm text-gray-700 hover:bg-gray-100 rounded-md flex items-center"
                     onClick={() => handleViewDocument(doc)}
                   >
@@ -269,7 +297,7 @@ export function DocumentWidget({ userId }: DocumentWidgetProps) {
                   </button>
                   <div className="flex space-x-1">
                     {doc.status === "failed" && (
-                      <button 
+                      <button
                         className="px-3 py-1 text-sm text-gray-700 hover:bg-gray-100 rounded-md flex items-center"
                         onClick={() => handleRetryProcessing(doc.id)}
                       >

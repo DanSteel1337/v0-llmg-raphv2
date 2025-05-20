@@ -19,7 +19,15 @@
  */
 
 import { apiCall } from "./apiCall"
-import type { Document, AnalyticsData, Conversation, Message, SearchResult, SearchOptions } from "@/types"
+import type {
+  Document,
+  AnalyticsData,
+  Conversation,
+  Message,
+  SearchResult,
+  SearchOptions,
+  ProcessingStep,
+} from "@/types"
 
 /**
  * Fetch documents for a user
@@ -52,6 +60,35 @@ export async function fetchDocuments(userId: string): Promise<Document[]> {
 }
 
 /**
+ * Get processing step description
+ *
+ * @param step Processing step
+ * @returns Human-readable description of the processing step
+ */
+export function getProcessingStepDescription(step?: ProcessingStep): string {
+  switch (step) {
+    case ProcessingStep.INITIALIZING:
+      return "Initializing document processing"
+    case ProcessingStep.READING_FILE:
+      return "Reading file contents"
+    case ProcessingStep.CHUNKING:
+      return "Splitting document into chunks"
+    case ProcessingStep.EMBEDDING:
+      return "Generating embeddings"
+    case ProcessingStep.INDEXING:
+      return "Indexing document in vector database"
+    case ProcessingStep.FINALIZING:
+      return "Finalizing document processing"
+    case ProcessingStep.COMPLETED:
+      return "Processing completed"
+    case ProcessingStep.FAILED:
+      return "Processing failed"
+    default:
+      return "Processing document"
+  }
+}
+
+/**
  * Upload a document
  *
  * @param userId User ID who owns the document
@@ -62,7 +99,7 @@ export async function fetchDocuments(userId: string): Promise<Document[]> {
 export async function uploadDocument(
   userId: string,
   file: File,
-  onProgress?: (progress: number) => void,
+  onProgress?: (progress: number, step?: ProcessingStep) => void,
 ): Promise<Document> {
   try {
     // Validate inputs
@@ -107,6 +144,11 @@ export async function uploadDocument(
       filePath: document.file_path,
     })
 
+    // Update progress with initializing step
+    if (typeof onProgress === "function") {
+      onProgress(5, ProcessingStep.INITIALIZING)
+    }
+
     const formData = new FormData()
     formData.append("file", file)
     formData.append("userId", userId)
@@ -126,6 +168,11 @@ export async function uploadDocument(
     if (!uploadResponse.success) {
       console.error("File upload failed:", uploadResponse)
       throw new Error("File upload failed")
+    }
+
+    // Update progress with reading file step
+    if (typeof onProgress === "function") {
+      onProgress(10, ProcessingStep.READING_FILE)
     }
 
     // Get the file URL (prioritize blobUrl)
@@ -174,19 +221,46 @@ export async function uploadDocument(
       )
     }
 
-    // Poll for document status updates if progress callback provided
-    if (onProgress) {
-      const pollInterval = setInterval(async () => {
+    // Step 4: Set up progress tracking if callback provided
+    if (typeof onProgress === "function") {
+      // Store the callback in a local variable to ensure it's preserved
+      const progressCallback = onProgress
+
+      // Initial progress update
+      progressCallback(15, ProcessingStep.CHUNKING)
+
+      let pollInterval: NodeJS.Timeout | null = setInterval(async () => {
         try {
           const documents = await fetchDocuments(userId)
           const updatedDocument = documents.find((d) => d.id === document.id)
 
           if (updatedDocument) {
-            if (updatedDocument.status === "indexed" || updatedDocument.status === "failed") {
-              clearInterval(pollInterval)
-              onProgress(updatedDocument.status === "indexed" ? 100 : 0)
+            if (updatedDocument.status === "indexed") {
+              if (pollInterval) {
+                clearInterval(pollInterval)
+                pollInterval = null
+              }
+              progressCallback(100, ProcessingStep.COMPLETED)
+            } else if (updatedDocument.status === "failed") {
+              if (pollInterval) {
+                clearInterval(pollInterval)
+                pollInterval = null
+              }
+              progressCallback(0, ProcessingStep.FAILED)
             } else if (updatedDocument.processing_progress !== undefined) {
-              onProgress(updatedDocument.processing_progress)
+              // Ensure progress is at least 15% once processing starts
+              const progress = Math.max(15, updatedDocument.processing_progress)
+
+              // Determine processing step based on progress
+              let step = updatedDocument.processing_step
+              if (!step) {
+                if (progress < 20) step = ProcessingStep.CHUNKING
+                else if (progress < 40) step = ProcessingStep.EMBEDDING
+                else if (progress < 80) step = ProcessingStep.INDEXING
+                else step = ProcessingStep.FINALIZING
+              }
+
+              progressCallback(progress, step)
             }
           }
         } catch (error) {
@@ -195,7 +269,15 @@ export async function uploadDocument(
       }, 2000)
 
       // Clean up interval after 5 minutes (max processing time)
-      setTimeout(() => clearInterval(pollInterval), 5 * 60 * 1000)
+      setTimeout(
+        () => {
+          if (pollInterval) {
+            clearInterval(pollInterval)
+            pollInterval = null
+          }
+        },
+        5 * 60 * 1000,
+      )
     }
 
     return {

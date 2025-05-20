@@ -28,7 +28,7 @@ import {
   deleteDocument as apiDeleteDocument,
   retryDocumentProcessing,
 } from "@/services/client-api-service"
-import type { Document } from "@/types"
+import type { Document, ProcessingStep } from "@/types"
 
 /**
  * Hook for document management functionality
@@ -119,13 +119,22 @@ export function useDocuments() {
    * @returns The created document
    */
   const handleUploadDocument = useCallback(
-    async (file: File, onProgress?: ((progress: number) => void) | undefined) => {
+    async (file: File, onProgress?: ((progress: number, step?: ProcessingStep) => void) | undefined) => {
       if (!user?.id) {
         throw new Error("User not authenticated")
       }
 
       try {
-        const newDocument = await apiUploadDocument(user.id, file, onProgress)
+        // Create a stable progress callback that won't change between renders
+        const progressCallback = onProgress
+          ? (progress: number, step?: ProcessingStep) => {
+              if (typeof onProgress === "function") {
+                onProgress(progress, step)
+              }
+            }
+          : undefined
+
+        const newDocument = await apiUploadDocument(user.id, file, progressCallback)
 
         // Add the new document to the state
         setDocuments((prevDocs) => [newDocument, ...prevDocs])
@@ -190,7 +199,13 @@ export function useDocuments() {
         setDocuments((prevDocs) =>
           prevDocs.map((doc) =>
             doc.id === documentId
-              ? { ...doc, status: "processing", processing_progress: 5, error_message: undefined }
+              ? {
+                  ...doc,
+                  status: "processing",
+                  processing_progress: 5,
+                  processing_step: "initializing" as ProcessingStep,
+                  error_message: undefined,
+                }
               : doc,
           ),
         )
@@ -218,6 +233,7 @@ export function useDocuments() {
                   ...doc,
                   status: "failed",
                   processing_progress: 0,
+                  processing_step: "failed" as ProcessingStep,
                   error_message: `Retry failed: ${err instanceof Error ? err.message : "Unknown error"}`,
                 }
               : doc,
