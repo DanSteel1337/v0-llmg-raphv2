@@ -4,7 +4,7 @@ import type { NextRequest } from "next/server"
 import { NextResponse } from "next/server"
 import { withErrorHandling } from "@/utils/errorHandling"
 import { logger } from "@/lib/utils/logger"
-import { head } from "@vercel/blob"  // Changed from getBlob to head
+import { head } from "@vercel/blob" // Changed from getBlob to head
 
 export const runtime = "edge"
 

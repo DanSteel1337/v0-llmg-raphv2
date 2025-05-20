@@ -1,7 +1,7 @@
 // hooks/use-documents.ts
 "use client"
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect } from "react"
 import { useAuth } from "@/hooks/use-auth"
 import {
   fetchDocuments as fetchDocumentsApi,
@@ -85,7 +85,7 @@ export function useDocuments() {
   )
 
   // Fetch documents on mount and when user changes
-  useState(() => {
+  useEffect(() => {
     fetchDocuments()
   }, [fetchDocuments])
 
