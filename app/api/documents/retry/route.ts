@@ -1,0 +1,162 @@
+/**
+ * Document Retry API Route
+ *
+ * Allows manual retrying of document processing for failed documents.
+ * Validates document existence and status before triggering reprocessing.
+ *
+ * Endpoint: POST /api/documents/retry
+ * Body: { documentId: string }
+ */
+
+import type { NextRequest } from "next/server"
+import { getDocumentById, processDocument } from "@/lib/document-service"
+import { logger } from "@/lib/utils/logger"
+
+export const runtime = "edge"
+
+export async function POST(request: NextRequest) {
+  try {
+    // Parse request body
+    const body = await request.json()
+    const { documentId } = body
+
+    // Validate document ID
+    if (!documentId) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: "Document ID is required",
+        }),
+        {
+          status: 400,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        },
+      )
+    }
+
+    logger.info(`Retry requested for document: ${documentId}`)
+
+    // Get document details
+    const document = await getDocumentById(documentId)
+
+    // Check if document exists
+    if (!document) {
+      logger.error(`Document not found for retry: ${documentId}`)
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: "Document not found",
+        }),
+        {
+          status: 404,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        },
+      )
+    }
+
+    // Check if document is already processing
+    if (document.status === "processing") {
+      logger.warn(`Document is already processing: ${documentId}`)
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: "Document is already being processed",
+          status: document.status,
+          progress: document.processing_progress,
+        }),
+        {
+          status: 409,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        },
+      )
+    }
+
+    // Check if document has required fields for processing
+    if (!document.file_path || !document.name) {
+      logger.error(`Document missing required fields for retry: ${documentId}`)
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: "Document is missing required fields for processing",
+          document: {
+            id: document.id,
+            name: document.name,
+            file_path: document.file_path,
+          },
+        }),
+        {
+          status: 400,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        },
+      )
+    }
+
+    // Construct file URL from file path
+    // This assumes file_path contains the full path to the file
+    const fileUrl = document.file_path.startsWith("http")
+      ? document.file_path
+      : `${request.nextUrl.origin}${document.file_path}`
+
+    logger.info(`Retrying document processing`, {
+      documentId,
+      previousStatus: document.status,
+      fileName: document.name,
+      fileUrl,
+    })
+
+    // Trigger document processing
+    // We're not awaiting this to avoid timeout issues
+    processDocument({
+      documentId: document.id,
+      userId: document.user_id,
+      filePath: document.file_path,
+      fileName: document.name,
+      fileType: document.file_type,
+      fileUrl,
+      isRetry: true,
+    }).catch((error) => {
+      logger.error(`Error in background document processing: ${error.message}`, {
+        documentId,
+        error: error instanceof Error ? error.stack : String(error),
+      })
+    })
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        message: "Document processing retry initiated",
+        documentId: document.id,
+        previousStatus: document.status,
+      }),
+      {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+        },
+      },
+    )
+  } catch (error) {
+    logger.error(`Error in retry API route: ${error instanceof Error ? error.message : "Unknown error"}`)
+
+    return new Response(
+      JSON.stringify({
+        success: false,
+        error: error instanceof Error ? error.message : "An unknown error occurred",
+      }),
+      {
+        status: 500,
+        headers: {
+          "Content-Type": "application/json",
+        },
+      },
+    )
+  }
+}

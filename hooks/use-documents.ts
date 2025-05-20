@@ -1,136 +1,166 @@
-/**
- * Use Documents Hook
- *
- * Custom hook for managing document operations including fetching,
- * uploading, and deleting documents.
- *
- * Dependencies:
- * - @/hooks/use-api for API interaction
- * - @/services/client-api-service for document operations
- */
-
 "use client"
 
-import { useEffect, useCallback, useState } from "react"
-import {
-  fetchDocuments,
-  uploadDocument as apiUploadDocument,
-  deleteDocument as apiDeleteDocument,
-} from "@/services/client-api-service"
+/**
+ * Documents Hook
+ *
+ * Custom hook for document management operations.
+ * Provides functionality for listing, uploading, deleting, and retrying document processing.
+ */
+
+import { useState, useEffect, useCallback } from "react"
+import { useAuth } from "./use-auth"
+import { useApi } from "./use-api"
 import type { Document } from "@/types"
 
-/**
- * Hook for document management operations
- *
- * @param userId The user ID for documents context
- * @returns Document operations and state
- */
-export function useDocuments(userId: string) {
+export function useDocuments(userId?: string) {
   const [documents, setDocuments] = useState<Document[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<Error | null>(null)
+  const { session } = useAuth()
+  const { apiCall } = useApi()
 
-  /**
-   * Fetch documents from the API and update state
-   */
-  const fetchDocumentsData = useCallback(async () => {
-    if (!userId) {
+  const effectiveUserId = userId || session?.user?.id
+
+  const fetchDocuments = useCallback(async () => {
+    if (!effectiveUserId) {
+      setDocuments([])
       setIsLoading(false)
       return
     }
 
-    setIsLoading(true)
-    setError(null)
-
     try {
-      const docs = await fetchDocuments(userId)
-      setDocuments(docs)
+      setIsLoading(true)
+      setError(null)
+
+      const response = await apiCall(`/api/documents?userId=${effectiveUserId}`, {
+        method: "GET",
+      })
+
+      if (!response.success) {
+        throw new Error(response.error || "Failed to fetch documents")
+      }
+
+      setDocuments(response.data || [])
     } catch (err) {
       console.error("Error fetching documents:", err)
       setError(err instanceof Error ? err : new Error(String(err)))
     } finally {
       setIsLoading(false)
     }
-  }, [userId])
+  }, [effectiveUserId, apiCall])
 
-  // Load documents on mount
   useEffect(() => {
-    fetchDocumentsData()
-  }, [fetchDocumentsData])
+    fetchDocuments()
+  }, [fetchDocuments])
 
-  /**
-   * Upload a document and optionally monitor progress
-   *
-   * @param file The file to upload
-   * @param onProgress Optional progress callback
-   * @returns Document metadata from the server
-   */
-  const handleUploadDocument = async (file: File, onProgress?: (progress: number) => void) => {
-    try {
-      setError(null)
-
-      // Validate file type
-      if (file.type !== "text/plain" && !file.name.endsWith(".txt")) {
-        throw new Error("Only .txt files are supported")
+  const uploadDocument = useCallback(
+    async (file: File, onProgress?: (progress: number) => void): Promise<Document> => {
+      if (!effectiveUserId) {
+        throw new Error("User ID is required")
       }
 
-      // Validate file size (max 10MB)
-      if (file.size > 10 * 1024 * 1024) {
-        throw new Error("File size must be less than 10MB")
+      try {
+        // Create a FormData object to send the file
+        const formData = new FormData()
+        formData.append("file", file)
+        formData.append("userId", effectiveUserId)
+
+        // Use fetch directly for FormData and to track upload progress
+        const response = await fetch("/api/documents/upload", {
+          method: "POST",
+          body: formData,
+        })
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}))
+          throw new Error(errorData.error || `Upload failed with status: ${response.status}`)
+        }
+
+        const result = await response.json()
+
+        if (!result.success) {
+          throw new Error(result.error || "Upload failed")
+        }
+
+        return result.data
+      } catch (err) {
+        console.error("Error uploading document:", err)
+        throw err instanceof Error ? err : new Error(String(err))
+      }
+    },
+    [effectiveUserId],
+  )
+
+  const deleteDocument = useCallback(
+    async (documentId: string): Promise<void> => {
+      if (!effectiveUserId) {
+        throw new Error("User ID is required")
       }
 
-      // Call the API service to upload the document
-      const document = await apiUploadDocument(userId, file, onProgress)
+      try {
+        const response = await apiCall(`/api/documents/${documentId}`, {
+          method: "DELETE",
+        })
 
-      // Validate the response
-      if (!document?.id || typeof document.id !== "string") {
-        throw new Error("Invalid document response from server")
+        if (!response.success) {
+          throw new Error(response.error || "Failed to delete document")
+        }
+
+        // Update local state to remove the deleted document
+        setDocuments((prevDocuments) => prevDocuments.filter((doc) => doc.id !== documentId))
+      } catch (err) {
+        console.error("Error deleting document:", err)
+        throw err instanceof Error ? err : new Error(String(err))
+      }
+    },
+    [effectiveUserId, apiCall],
+  )
+
+  const retryDocumentProcessing = useCallback(
+    async (documentId: string): Promise<void> => {
+      if (!effectiveUserId) {
+        throw new Error("User ID is required")
       }
 
-      // Refresh the documents list to include the newly uploaded document
-      fetchDocumentsData()
+      try {
+        const response = await apiCall(`/api/documents/retry`, {
+          method: "POST",
+          body: JSON.stringify({ documentId }),
+        })
 
-      return document
-    } catch (err) {
-      console.error("Error uploading document:", err)
-      setError(err instanceof Error ? err : new Error(String(err)))
-      throw err
-    }
-  }
+        if (!response.success) {
+          throw new Error(response.error || "Failed to retry document processing")
+        }
 
-  /**
-   * Delete a document by ID
-   *
-   * @param id Document ID to delete
-   */
-  const handleDeleteDocument = async (id: string) => {
-    try {
-      setError(null)
-
-      if (!id || typeof id !== "string") {
-        throw new Error("Invalid document ID")
+        // Update local state to reflect the document is now processing
+        setDocuments((prevDocuments) =>
+          prevDocuments.map((doc) =>
+            doc.id === documentId
+              ? {
+                  ...doc,
+                  status: "processing",
+                  processing_progress: 0,
+                  error_message: undefined,
+                  updated_at: new Date().toISOString(),
+                }
+              : doc,
+          ),
+        )
+      } catch (err) {
+        console.error("Error retrying document processing:", err)
+        throw err instanceof Error ? err : new Error(String(err))
       }
-
-      // Call the API service to delete the document
-      await apiDeleteDocument(id)
-
-      // Update the local state to remove the deleted document
-      setDocuments((prevDocs) => prevDocs.filter((doc) => doc.id !== id))
-
-      return true
-    } catch (err) {
-      console.error("Error deleting document:", err)
-      setError(err instanceof Error ? err : new Error(String(err)))
-      throw err
-    }
-  }
+    },
+    [effectiveUserId, apiCall],
+  )
 
   return {
     documents,
     isLoading,
     error,
-    uploadDocument: handleUploadDocument,
-    deleteDocument: handleDeleteDocument,
-    refreshDocuments: fetchDocumentsData,
+    uploadDocument,
+    refreshDocuments: fetchDocuments,
+    deleteDocument,
+    retryDocumentProcessing,
   }
 }

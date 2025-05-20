@@ -17,11 +17,12 @@ import type React from "react"
 import type { Document } from "@/types"
 
 import { useState, useRef, useEffect } from "react"
-import { FileText, Upload, AlertCircle, CheckCircle, HelpCircle, Trash } from "lucide-react"
+import { FileText, Upload, AlertCircle, CheckCircle, HelpCircle, Trash, Bug } from "lucide-react"
 import { DashboardCard } from "@/components/ui/dashboard-card"
 import { useDocuments } from "@/hooks/use-documents"
 import { formatFileSize, formatDate } from "@/utils/formatting"
 import { useToast } from "@/components/toast"
+import { DocumentDebug } from "./document-debug"
 
 interface DocumentWidgetProps {
   userId: string
@@ -29,11 +30,14 @@ interface DocumentWidgetProps {
 }
 
 export function DocumentWidget({ userId, limit = 5 }: DocumentWidgetProps) {
-  const { documents, isLoading, error, uploadDocument, refreshDocuments, deleteDocument } = useDocuments(userId)
+  const { documents, isLoading, error, uploadDocument, refreshDocuments, deleteDocument, retryDocumentProcessing } =
+    useDocuments(userId)
   const [isUploading, setIsUploading] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [processingDocuments, setProcessingDocuments] = useState<Set<string>>(new Set())
   const [processingTimeouts, setProcessingTimeouts] = useState<Record<string, NodeJS.Timeout>>({})
+  const [selectedDocument, setSelectedDocument] = useState<Document | null>(null)
+  const [showDebugPanel, setShowDebugPanel] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const { addToast } = useToast()
 
@@ -193,10 +197,33 @@ export function DocumentWidget({ userId, limit = 5 }: DocumentWidgetProps) {
       await deleteDocument(documentId)
       addToast("Document deleted successfully", "success")
       refreshDocuments()
+
+      // If the deleted document was selected, clear the selection
+      if (selectedDocument?.id === documentId) {
+        setSelectedDocument(null)
+        setShowDebugPanel(false)
+      }
     } catch (error) {
       console.error("Delete error:", error)
       const message = error instanceof Error ? error.message : "Unknown error occurred"
       addToast("Failed to delete document: " + message, "error")
+    }
+  }
+
+  const handleDebugDocument = (document: Document) => {
+    setSelectedDocument(document)
+    setShowDebugPanel(true)
+  }
+
+  const handleRetryProcessing = async (documentId: string) => {
+    try {
+      await retryDocumentProcessing(documentId)
+      addToast("Document processing retry initiated", "success")
+      refreshDocuments()
+    } catch (error) {
+      console.error("Retry error:", error)
+      const message = error instanceof Error ? error.message : "Unknown error occurred"
+      addToast("Failed to retry document processing: " + message, "error")
     }
   }
 
@@ -261,6 +288,13 @@ export function DocumentWidget({ userId, limit = 5 }: DocumentWidgetProps) {
                 </div>
                 <div className="flex items-center space-x-2">
                   {getStatusIcon(doc.status)}
+                  <button
+                    onClick={() => handleDebugDocument(doc)}
+                    className="text-blue-500 hover:text-blue-700"
+                    title="Debug document"
+                  >
+                    <Bug className="h-4 w-4" />
+                  </button>
                   {doc.status !== "processing" && (
                     <button
                       onClick={() => handleDeleteDocument(doc.id)}
@@ -279,6 +313,13 @@ export function DocumentWidget({ userId, limit = 5 }: DocumentWidgetProps) {
             {errorMessage
               ? "Unable to load documents. Please try again."
               : "No documents yet. Upload your first document to get started."}
+          </div>
+        )}
+
+        {showDebugPanel && selectedDocument && (
+          <div className="mt-4">
+            <h3 className="text-sm font-medium text-gray-700 mb-2">Document Debug Information</h3>
+            <DocumentDebug document={selectedDocument} onRetry={handleRetryProcessing} />
           </div>
         )}
       </div>
