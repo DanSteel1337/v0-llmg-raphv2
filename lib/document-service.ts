@@ -1,3 +1,5 @@
+// lib/document-service.ts
+
 /**
  * Document Service
  *
@@ -66,7 +68,7 @@ export async function createDocument(
     file_type: fileType || "text/plain",
     file_size: fileSize || 0,
     file_path: filePath || "",
-    status: "processing",
+    status: "processing", // Set initial status to "processing" instead of "created"
     processing_progress: 0,
     error_message: undefined,
     created_at: now,
@@ -80,7 +82,7 @@ export async function createDocument(
 
   await upsertVectors([
     {
-      id: `meta_${documentId}`,
+      id: documentId, // FIXED: Use consistent ID pattern with no prefix
       values: placeholderVector, // Non-zero placeholder vector
       metadata: {
         ...document,
@@ -234,7 +236,7 @@ export async function updateDocumentStatus(
 
   await upsertVectors([
     {
-      id: `meta_${documentId}`,
+      id: documentId, // FIXED: Use consistent ID pattern with no prefix
       values: placeholderVector,
       metadata: {
         ...updatedDocument,
@@ -338,8 +340,22 @@ export async function processDocument({
     logger.info(`Processing document: Chunking content`, { documentId });
     const allChunks = chunkDocument(text, MAX_CHUNK_SIZE, CHUNK_OVERLAP);
 
+    // DEBUGGING: Log chunks before filtering
+    logger.info(`Document chunks before filtering:`, {
+      documentId,
+      totalChunks: allChunks.length,
+      sampleChunk: allChunks.length > 0 ? allChunks[0].substring(0, 100) + "..." : "None"
+    });
+
     // Filter out non-informative chunks
     const chunks = allChunks.filter((chunk) => isInformativeChunk(chunk));
+
+    // DEBUGGING: Log chunks after filtering
+    logger.info(`Document chunks after filtering:`, {
+      documentId,
+      validChunks: chunks.length,
+      sampleChunk: chunks.length > 0 ? chunks[0].substring(0, 100) + "..." : "None"
+    });
 
     logger.info(`Processing document: Chunking complete`, {
       documentId,
@@ -509,7 +525,7 @@ export async function processDocument({
     const placeholderVector = createPlaceholderVector();
     await upsertVectors([
       {
-        id: `meta_${documentId}`,
+        id: documentId, // FIXED: Use consistent ID pattern with no prefix
         values: placeholderVector,
         metadata: {
           id: documentId,
@@ -573,7 +589,7 @@ export async function processDocument({
  */
 export async function deleteDocument(id: string): Promise<void> {
   // Delete the document
-  await deleteVectors([`meta_${id}`]);
+  await deleteVectors([id]); // FIXED: Use consistent ID pattern with no prefix
 
   // Create a placeholder vector with small non-zero values
   const placeholderVector = createPlaceholderVector();
@@ -605,6 +621,11 @@ export async function deleteDocument(id: string): Promise<void> {
 function isInformativeChunk(text: string): boolean {
   if (!text || text.trim() === "") {
     return false;
+  }
+
+  // ENHANCED: Less restrictive check for markdown content
+  if (text.includes('#') || text.includes('|') || text.includes('```')) {
+    return true;  // Consider markdown headings, tables, and code blocks as informative
   }
 
   // Skip chunks that are too short

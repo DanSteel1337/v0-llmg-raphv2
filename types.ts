@@ -13,11 +13,13 @@ export interface Document {
   file_type: string
   file_size: number
   file_path: string
-  status: "processing" | "indexed" | "failed"
+  status: "created" | "processing" | "indexed" | "failed" // UPDATED: Added "created" status for backward compatibility
   processing_progress?: number
   error_message?: string
   created_at: string
   updated_at: string
+  chunk_count?: number // Added for completeness
+  embedding_model?: string // Added for completeness
 }
 
 // Document processing options

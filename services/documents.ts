@@ -1,3 +1,5 @@
+// services/documents.ts
+
 /**
  * Document service for creating and managing documents
  * 
@@ -45,7 +47,7 @@ export const createDocument = async (params: {
     file_type: fileType,
     file_size: fileSize,
     file_path: filePath,
-    status: "created",
+    status: "processing", // FIXED: Changed from "created" to "processing"
     created_at: timestamp,
     updated_at: timestamp,
     chunk_count: 0,
@@ -67,7 +69,7 @@ export const createDocument = async (params: {
     
     await upsertVectors([
       {
-        id: documentId,
+        id: documentId, // FIXED: Use consistent ID pattern with no prefix
         values: placeholderVector, // Proper placeholder vector with non-zero values
         metadata: {
           ...document,
