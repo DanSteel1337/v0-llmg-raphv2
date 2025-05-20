@@ -220,7 +220,9 @@ export async function uploadDocument(
       const progressCallback = onProgress
 
       // Initial progress update
-      progressCallback(15, ProcessingStep.CHUNKING)
+      if (typeof progressCallback === "function") {
+        progressCallback(15, ProcessingStep.CHUNKING)
+      }
 
       let pollInterval: NodeJS.Timeout | null = setInterval(async () => {
         try {
@@ -228,6 +230,15 @@ export async function uploadDocument(
           const updatedDocument = documents.find((d) => d.id === document.id)
 
           if (updatedDocument) {
+            // Check if callback is still a function before calling it
+            if (typeof progressCallback !== "function") {
+              if (pollInterval) {
+                clearInterval(pollInterval)
+                pollInterval = null
+              }
+              return
+            }
+
             if (updatedDocument.status === "indexed") {
               if (pollInterval) {
                 clearInterval(pollInterval)
@@ -258,6 +269,11 @@ export async function uploadDocument(
           }
         } catch (error) {
           console.error("Error polling document status:", error)
+          // Don't let errors in polling prevent cleanup
+          if (pollInterval) {
+            clearInterval(pollInterval)
+            pollInterval = null
+          }
         }
       }, 2000)
 

@@ -84,11 +84,12 @@ export function DocumentWidget({ userId }: DocumentWidgetProps) {
       setCurrentStep(undefined)
 
       try {
-        // Create a stable progress callback that's bound to this component instance
+        // Create a stable progress callback that's properly bound to this component instance
         const updateProgress = (progress: number, step?: ProcessingStep) => {
-          setUploadProgress(progress)
+          // Use functional updates to ensure we're working with the latest state
+          setUploadProgress((currentProgress) => progress)
           if (step) {
-            setCurrentStep(step)
+            setCurrentStep((currentStep) => step)
           }
         }
 
