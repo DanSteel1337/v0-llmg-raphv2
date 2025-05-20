@@ -1,51 +1,66 @@
-import { withErrorHandling, uploadFile, type NextRequest, type File } from "your-module-path"
+/**
+ * Document Upload API Route
+ *
+ * API endpoint for uploading document files.
+ *
+ * Dependencies:
+ * - @/services/document-service for document operations
+ * - @/lib/api-utils for API response handling
+ */
 
-export const POST = async (request: NextRequest) => {
-  return withErrorHandling(async () => {
-    const formData = await request.formData()
-    const file = formData.get("file") as File
-    const userId = formData.get("userId") as string
-    const documentId = formData.get("documentId") as string
-    const filePath = formData.get("filePath") as string
+import type { NextRequest } from "next/server"
+import { handleApiRequest } from "@/utils/apiRequest"
+import { withErrorHandling } from "@/utils/errorHandling"
+import { validateRequiredFields } from "@/utils/validation"
+import { uploadFile } from "@/services/document-service"
 
-    console.log(`POST /api/documents/upload - Uploading file`, {
-      documentId,
-      userId,
-      filePath,
-      fileName: file?.name,
-      fileSize: file?.size,
-    })
+export const runtime = "edge"
 
-    // Validate all required fields
-    if (!file) {
-      throw new Error("File is required")
+export const POST = withErrorHandling(async (request: NextRequest) => {
+  return handleApiRequest(async () => {
+    try {
+      const formData = await request.formData()
+      const file = formData.get("file") as File
+      const userId = formData.get("userId") as string
+      const documentId = formData.get("documentId") as string
+      const filePath = formData.get("filePath") as string
+
+      console.log(`POST /api/documents/upload - Uploading file`, {
+        documentId,
+        userId,
+        filePath,
+        fileName: file?.name,
+        fileSize: file?.size,
+      })
+
+      // Validate all required fields
+      validateRequiredFields(
+        { file, userId, documentId, filePath },
+        ["file", "userId", "documentId", "filePath"],
+        "Document upload",
+      )
+
+      // Upload and persist the file
+      const result = await uploadFile(userId, file, documentId, filePath)
+
+      console.log(`POST /api/documents/upload - File uploaded successfully`, {
+        documentId,
+        filePath,
+        success: result.success,
+      })
+
+      return {
+        success: true,
+        documentId,
+        filePath,
+      }
+    } catch (error) {
+      console.error("POST /api/documents/upload - Error uploading file", {
+        error: error instanceof Error ? error.message : "Unknown error",
+        stack: error instanceof Error ? error.stack : undefined,
+        url: request.url,
+      })
+      throw error
     }
-
-    if (!userId) {
-      throw new Error("User ID is required")
-    }
-
-    if (!documentId) {
-      throw new Error("Document ID is required")
-    }
-
-    if (!filePath) {
-      throw new Error("File path is required")
-    }
-
-    // Upload and persist the file
-    const result = await uploadFile(userId, file, documentId, filePath)
-
-    console.log(`POST /api/documents/upload - File uploaded successfully`, {
-      documentId,
-      filePath,
-      success: result.success,
-    })
-
-    return {
-      success: true,
-      documentId,
-      filePath,
-    }
-  })
-}
+  }, request)
+})
