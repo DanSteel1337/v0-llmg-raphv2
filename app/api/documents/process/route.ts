@@ -1,5 +1,3 @@
-// app/api/documents/process/route.ts
-
 /**
  * Document Processing API Route
  *
@@ -10,7 +8,13 @@
  * - Embedding generation
  * - Vector storage in Pinecone
  * 
- * The actual processing runs asynchronously to avoid Edge function timeouts.
+ * IMPORTANT:
+ * - ALWAYS declare runtime = "edge" for compatibility with Vercel Edge
+ * - NEVER use Node-specific modules (fs, path, etc.)
+ * - ALWAYS validate required fields before processing
+ * - ALWAYS return { success: true/false } in responses
+ * - ALWAYS use background processing for long-running tasks
+ * - If a document fails processing, set its status to "failed" with an error message
  * 
  * Dependencies:
  * - @/utils/errorHandling for consistent error handling
@@ -102,7 +106,7 @@ export const POST = withErrorHandling(async (request: NextRequest) => {
 
         if (!fileResponse.ok) {
           logger.error(`POST /api/documents/process - File not accessible via HEAD request: ${fileUrl}`, {
-            status: fileResponse.status,
+          status: fileResponse.status,
             statusText: fileResponse.statusText,
             documentId
           })

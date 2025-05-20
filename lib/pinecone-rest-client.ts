@@ -4,11 +4,16 @@
  * Provides a standardized interface for interacting with Pinecone Serverless vector database.
  * Implements retry logic, error handling, and validation to ensure reliable operations.
  * 
- * Key Features:
- * - Singleton pattern for client management
- * - Exponential backoff retry for rate limits and transient errors
- * - Vector validation to prevent invalid operations
- * - Batch processing with size limitations
+ * IMPORTANT:
+ * - Always use createPlaceholderVector() for placeholders, never zero vectors
+ * - Document IDs should not have prefixes when stored in Pinecone
+ * - All vector operations must be Edge-compatible
+ * - Always implement retry logic for rate limits
+ * - Always validate vectors before sending to Pinecone
+ * 
+ * Dependencies:
+ * - @/lib/embedding-config for vector dimensions
+ * - @/lib/utils/logger for structured logging
  * 
  * @module lib/pinecone-rest-client
  */

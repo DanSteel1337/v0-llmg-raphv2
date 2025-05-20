@@ -4,13 +4,13 @@
  * Client-side abstraction for API calls to handle document management, search,
  * chat, and analytics operations. Provides a clean interface for all API
  * interactions used by React components and hooks.
- *
- * Features:
- * - Document upload and management
- * - Search functionality
- * - Chat and conversation handling
- * - Analytics and system health checks
- * - Standardized error handling
+ * 
+ * IMPORTANT:
+ * - ALWAYS check for a success flag in responses
+ * - ALWAYS validate inputs before making API calls
+ * - NEVER expose API keys or secrets in client code
+ * - ALWAYS add proper error handling around fetch calls
+ * - Use standardized response format: { success: true/false, data/error }
  * 
  * Dependencies:
  * - ./apiCall for standardized API request formatting
@@ -36,9 +36,9 @@ export async function fetchDocuments(userId: string): Promise<Document[]> {
     }
     
     console.log(`Fetching documents for user ${userId}`);
-    const response = await apiCall<{ documents: Document[] }>(`/api/documents?userId=${encodeURIComponent(userId)}`);
+    const response = await apiCall<{ success: boolean; documents: Document[] }>(`/api/documents?userId=${encodeURIComponent(userId)}`);
     
-    if (!response || !response.documents) {
+    if (!response || !response.success || !response.documents) {
       console.warn("Received invalid response from documents API", { response });
       return [];
     }
@@ -80,7 +80,7 @@ export async function uploadDocument(
       fileSize: file.size,
     });
 
-    const createResponse = await apiCall<{ document: Document }>("/api/documents", {
+    const createResponse = await apiCall<{ success: boolean; document: Document }>("/api/documents", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -93,12 +93,12 @@ export async function uploadDocument(
     });
 
     // Validate document response
-    const document = createResponse?.document;
-    if (!document?.id || !document?.file_path) {
-      console.error("Document creation failed - missing fields:", document);
+    if (!createResponse.success || !createResponse.document?.id || !createResponse.document?.file_path) {
+      console.error("Document creation failed - missing fields:", createResponse);
       throw new Error("Document creation failed: Missing document ID or file path");
     }
 
+    const document = createResponse.document;
     console.log("Document metadata created successfully:", {
       documentId: document.id,
       filePath: document.file_path,
@@ -121,7 +121,7 @@ export async function uploadDocument(
       body: formData,
     });
 
-    if (!uploadResponse?.success) {
+    if (!uploadResponse.success) {
       console.error("File upload failed:", uploadResponse);
       throw new Error("File upload failed");
     }
@@ -142,7 +142,7 @@ export async function uploadDocument(
     });
 
     try {
-      const processResponse = await apiCall<{ success?: boolean; status?: string; message?: string; error?: string }>(
+      const processResponse = await apiCall<{ success: boolean; status?: string; message?: string; error?: string }>(
         "/api/documents/process",
         {
           method: "POST",
@@ -241,6 +241,25 @@ export async function deleteDocument(documentId: string): Promise<{ success: boo
 }
 
 /**
+ * Retry processing a failed document
+ * 
+ * @param documentId - Document ID to retry
+ * @returns Success response
+ */
+export async function retryDocumentProcessing(documentId: string): Promise<{ success: boolean }> {
+  if (!documentId) {
+    console.error("retryDocumentProcessing called without documentId");
+    throw new Error("Document ID is required");
+  }
+  
+  return await apiCall<{ success: boolean }>("/api/documents/retry", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ documentId }),
+  });
+}
+
+/**
  * Fetch analytics data for a user
  * 
  * @param userId - User ID for analytics
@@ -253,7 +272,15 @@ export async function fetchAnalytics(userId: string, timeRange = "7d"): Promise<
     throw new Error("User ID is required");
   }
   
-  return await apiCall<AnalyticsData>(`/api/analytics?userId=${encodeURIComponent(userId)}&timeRange=${encodeURIComponent(timeRange)}`);
+  const response = await apiCall<{ success: boolean } & AnalyticsData>(
+    `/api/analytics?userId=${encodeURIComponent(userId)}&timeRange=${encodeURIComponent(timeRange)}`
+  );
+  
+  if (!response.success) {
+    throw new Error("Failed to fetch analytics data");
+  }
+  
+  return response;
 }
 
 /**
@@ -271,6 +298,7 @@ export async function checkApiHealth(): Promise<{
 }> {
   try {
     const response = await apiCall<{
+      success: boolean;
       status: string;
       services: Record<string, boolean>;
       errors?: {
@@ -281,6 +309,10 @@ export async function checkApiHealth(): Promise<{
 
     // Log the full response for debugging
     console.log("Health check response:", response);
+
+    if (!response.success) {
+      throw new Error("Health check failed");
+    }
 
     return {
       pineconeApiHealthy: response?.services?.pinecone || false,
@@ -316,7 +348,15 @@ export async function fetchConversations(userId: string): Promise<Conversation[]
   }
   
   try {
-    const response = await apiCall<{ conversations: Conversation[] }>(`/api/conversations?userId=${encodeURIComponent(userId)}`);
+    const response = await apiCall<{ success: boolean; conversations: Conversation[] }>(
+      `/api/conversations?userId=${encodeURIComponent(userId)}`
+    );
+    
+    if (!response.success) {
+      console.warn("Unsuccessful response from conversations API", { response });
+      return [];
+    }
+    
     return Array.isArray(response.conversations) ? response.conversations : [];
   } catch (error) {
     console.error("Error fetching conversations:", error);
@@ -335,7 +375,7 @@ export async function createConversation(userId: string, title: string): Promise
   if (!userId) throw new Error("User ID is required");
   if (!title) title = "New Conversation";
   
-  const response = await apiCall<{ conversation: Conversation }>("/api/conversations", {
+  const response = await apiCall<{ success: boolean; conversation: Conversation }>("/api/conversations", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -343,7 +383,7 @@ export async function createConversation(userId: string, title: string): Promise
     body: JSON.stringify({ userId, title }),
   });
 
-  if (!response?.conversation?.id) {
+  if (!response.success || !response?.conversation?.id) {
     console.error("Invalid response from createConversation:", response);
     throw new Error("Failed to create conversation: Invalid response from server");
   }
@@ -364,9 +404,14 @@ export async function fetchMessages(conversationId: string): Promise<Message[]> 
   }
   
   try {
-    const response = await apiCall<{ messages: Message[] }>(
+    const response = await apiCall<{ success: boolean; messages: Message[] }>(
       `/api/chat/messages?conversationId=${encodeURIComponent(conversationId)}`
     );
+    
+    if (!response.success) {
+      console.warn("Unsuccessful response from messages API", { response });
+      return [];
+    }
     
     return Array.isArray(response?.messages) ? response.messages : [];
   } catch (error) {
@@ -401,7 +446,7 @@ export async function sendMessage(conversationId: string, content: string, userI
   });
   
   try {
-    const response = await apiCall<{ message: Message }>("/api/chat/messages", {
+    const response = await apiCall<{ success: boolean; message: Message }>("/api/chat/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -409,7 +454,7 @@ export async function sendMessage(conversationId: string, content: string, userI
       body: JSON.stringify(requestBody),
     });
 
-    if (!response?.message) {
+    if (!response.success || !response?.message) {
       console.error("Invalid response from sendMessage:", response);
       throw new Error("Failed to send message: Invalid response from server");
     }
@@ -480,7 +525,13 @@ export async function performSearch(
 
   try {
     // Execute search
-    const response = await apiCall<{ results: SearchResult[] }>(url);
+    const response = await apiCall<{ success: boolean; results: SearchResult[] }>(url);
+    
+    if (!response.success) {
+      console.warn("Unsuccessful response from search API", { response });
+      return [];
+    }
+    
     return Array.isArray(response?.results) ? response.results : [];
   } catch (error) {
     console.error("Error performing search:", error);

@@ -1,27 +1,54 @@
 /**
- * Document Service
+ * Document Processing Service
  *
- * Handles document operations including creation, retrieval, and processing.
- * Core service for managing document lifecycle in the application.
- * 
+ * Core service for document management, processing, and vector operations.
+ * Handles the complete document lifecycle including:
+ * - Document metadata creation and management
+ * - Text extraction and processing
+ * - Chunking of document content
+ * - Embedding generation
+ * - Vector storage and retrieval
+ * - Document status tracking
+ *
+ * IMPORTANT:
+ * - Always use the standardized document ID format: `doc_${timestamp}_${random}`
+ * - Don't add prefixes like 'meta_' to document IDs when storing in Pinecone
+ * - Always use createPlaceholderVector() for vector placeholders, never zero vectors
+ * - Document status should be one of: "processing", "indexed", "failed"
+ * - All document operations must be Edge-compatible (no Node.js modules)
+ *
  * Dependencies:
  * - @/lib/pinecone-rest-client for vector database operations
  * - @/lib/embedding-service for embedding generation
  * - @/lib/chunking-utils for document text processing
+ * - @/lib/utils/logger for structured logging
+ *
+ * @module lib/document-service
  */
 
 import { upsertVectors, queryVectors, deleteVectors, createPlaceholderVector } from "@/lib/pinecone-rest-client"
 import { generateEmbedding } from "@/lib/embedding-service"
 import { chunkDocument } from "@/lib/chunking-utils"
 import { EMBEDDING_MODEL } from "@/lib/embedding-config"
+import { logger } from "@/lib/utils/logger"
 import type { Document, ProcessDocumentOptions } from "@/types"
 
 // Constants
-const MAX_CHUNK_SIZE = 1000
+const MAX_CHUNK_SIZE = 1000 // Optimal size for embedding chunks
+const CHUNK_OVERLAP = 150 // Overlap between consecutive chunks
+const EMBEDDING_BATCH_SIZE = 10 // Process embeddings in small batches
+const MAX_RETRIES = 3 // Maximum retries for API operations
 
 /**
- * Creates a new document in the system
- * Uses proper placeholder vectors for metadata storage in Pinecone
+ * Creates a new document and stores its metadata
+ *
+ * @param userId - User ID for document ownership
+ * @param name - Document name
+ * @param description - Optional document description
+ * @param fileType - Document MIME type
+ * @param fileSize - Document size in bytes
+ * @param filePath - Storage path for the document
+ * @returns Created document metadata
  */
 export async function createDocument(
   userId: string,
@@ -44,21 +71,21 @@ export async function createDocument(
     file_type: fileType || "text/plain",
     file_size: fileSize || 0,
     file_path: filePath || "",
-    status: "processing",
+    status: "processing", // Set initial status to "processing"
     processing_progress: 0,
     error_message: undefined,
     created_at: now,
     updated_at: now,
   }
 
-  console.log(`Creating document record`, { userId, name, documentId })
+  logger.info(`Creating document record`, { userId, name, documentId })
 
   // Create a placeholder vector with small non-zero values
   const placeholderVector = createPlaceholderVector()
 
   await upsertVectors([
     {
-      id: `meta_${documentId}`,
+      id: documentId, // Use consistent ID pattern with no prefix
       values: placeholderVector, // Non-zero placeholder vector
       metadata: {
         ...document,
@@ -67,17 +94,19 @@ export async function createDocument(
     },
   ])
 
-  console.log(`Document record created successfully`, { documentId, userId })
+  logger.info(`Document record created successfully`, { documentId, userId })
 
   return document
 }
 
 /**
- * Gets all documents for a user
- * Retrieves document metadata from Pinecone
+ * Gets documents by user ID
+ *
+ * @param userId - User ID to filter documents
+ * @returns Array of documents
  */
 export async function getDocumentsByUserId(userId: string): Promise<Document[]> {
-  console.log(`Getting documents for user`, { userId })
+  logger.info(`Getting documents for user`, { userId })
 
   // Create a placeholder vector with non-zero values
   const placeholderVector = createPlaceholderVector()
@@ -94,7 +123,7 @@ export async function getDocumentsByUserId(userId: string): Promise<Document[]> 
 
   // Handle potential error from Pinecone
   if ("error" in response && response.error) {
-    console.error("Error querying documents from Pinecone:", response)
+    logger.error("Error querying documents from Pinecone:", response)
     return [] // Return empty array as fallback
   }
 
@@ -114,46 +143,18 @@ export async function getDocumentsByUserId(userId: string): Promise<Document[]> 
     error_message: match.metadata?.error_message as string | undefined,
     created_at: match.metadata?.created_at as string,
     updated_at: match.metadata?.updated_at as string,
+    debug_info: match.metadata?.debug_info as Record<string, any> | undefined,
   }))
 
-  console.log(`Found ${documents.length} documents for user`, { userId })
+  logger.info(`Found ${documents.length} documents for user`, { userId })
   return documents
 }
 
 /**
- * Gets document count for a user
- */
-export async function getDocumentCountByUserId(userId: string): Promise<number> {
-  try {
-    // Create a placeholder vector with small non-zero values
-    const placeholderVector = createPlaceholderVector()
-
-    // Query Pinecone for documents with the specified user_id
-    const response = await queryVectors(
-      placeholderVector,
-      10000, // Use a high limit, but be aware of potential truncation
-      true,
-      {
-        user_id: { $eq: userId },
-        record_type: { $eq: "document" },
-      },
-    )
-
-    // Handle potential error from Pinecone
-    if ("error" in response && response.error) {
-      console.error("Error getting document count from Pinecone:", response)
-      return 0 // Return 0 as fallback
-    }
-
-    return response.matches?.length || 0
-  } catch (error) {
-    console.error("Error getting document count:", error)
-    return 0
-  }
-}
-
-/**
  * Gets a document by ID
+ *
+ * @param id - Document ID
+ * @returns Document object or null if not found
  */
 export async function getDocumentById(id: string): Promise<Document | null> {
   // Create a placeholder vector with small non-zero values
@@ -171,7 +172,7 @@ export async function getDocumentById(id: string): Promise<Document | null> {
 
   // Handle potential error from Pinecone
   if ("error" in response && response.error) {
-    console.error("Error querying document from Pinecone:", response)
+    logger.error("Error querying document from Pinecone:", response)
     return null // Return null as fallback
   }
 
@@ -194,17 +195,26 @@ export async function getDocumentById(id: string): Promise<Document | null> {
     error_message: match.metadata?.error_message as string | undefined,
     created_at: match.metadata?.created_at as string,
     updated_at: match.metadata?.updated_at as string,
+    debug_info: match.metadata?.debug_info as Record<string, any> | undefined,
   }
 }
 
 /**
  * Updates a document's status
+ *
+ * @param documentId - Document ID
+ * @param status - New status
+ * @param progress - Processing progress percentage
+ * @param errorMessage - Optional error message
+ * @param debugInfo - Optional debug information
+ * @returns Updated document
  */
 export async function updateDocumentStatus(
   documentId: string,
   status: "processing" | "indexed" | "failed",
   progress: number,
   errorMessage?: string,
+  debugInfo?: Record<string, any>,
 ): Promise<Document> {
   // Get current document
   const document = await getDocumentById(documentId)
@@ -217,20 +227,29 @@ export async function updateDocumentStatus(
     ...document,
     status,
     processing_progress: progress,
-    error_message: errorMessage || "",
+    error_message: errorMessage,
+    debug_info: debugInfo || document.debug_info,
     updated_at: new Date().toISOString(),
   }
+
+  logger.info(`Updating document status`, {
+    documentId,
+    status,
+    progress,
+    errorMessage: errorMessage ? `${errorMessage.substring(0, 100)}...` : undefined,
+    hasDebugInfo: !!debugInfo,
+  })
 
   // Create a non-zero placeholder vector
   const placeholderVector = createPlaceholderVector()
 
   await upsertVectors([
     {
-      id: documentId,
-      values: placeholderVector, // Non-zero placeholder vector
+      id: documentId, // Use consistent ID pattern with no prefix
+      values: placeholderVector,
       metadata: {
         ...updatedDocument,
-        record_type: "document", // Consistent record_type
+        record_type: "document",
       },
     },
   ])
@@ -239,35 +258,10 @@ export async function updateDocumentStatus(
 }
 
 /**
- * Deletes a document and all its chunks
- */
-export async function deleteDocument(id: string): Promise<void> {
-  // Delete the document
-  await deleteVectors([id])
-
-  // Create a placeholder vector with small non-zero values
-  const placeholderVector = createPlaceholderVector()
-
-  // Find all chunks for this document
-  const response = await queryVectors(
-    placeholderVector,
-    1000,
-    true,
-    {
-      document_id: { $eq: id },
-      record_type: { $eq: "chunk" },
-    },
-  )
-
-  // Delete all chunks
-  if (response.matches && response.matches.length > 0) {
-    const chunkIds = response.matches.map((match) => match.id)
-    await deleteVectors(chunkIds)
-  }
-}
-
-/**
- * Processes a document: extracts text, chunks it, and stores embeddings
+ * Processes a document by extracting text, creating chunks, and generating embeddings
+ *
+ * @param options - Document processing options
+ * @returns Processing result
  */
 export async function processDocument({
   documentId,
@@ -276,12 +270,23 @@ export async function processDocument({
   fileName,
   fileType,
   fileUrl,
-}: ProcessDocumentOptions): Promise<{
+  isRetry = false,
+}: ProcessDocumentOptions & { isRetry?: boolean }): Promise<{
   success: boolean
   chunksProcessed: number
   vectorsInserted: number
   error?: string
+  debugInfo?: Record<string, any>
 }> {
+  // Initialize timing and debug info
+  const startTime = performance.now()
+  const debugInfo: Record<string, any> = {
+    processingStartTime: new Date().toISOString(),
+    isRetry,
+    steps: {},
+    timings: {},
+  }
+
   try {
     // Validate required parameters
     if (!documentId) throw new Error("documentId is required")
@@ -291,43 +296,211 @@ export async function processDocument({
     if (!fileType) throw new Error("fileType is required")
     if (!fileUrl) throw new Error("fileUrl is required")
 
-    // Update document status to processing
-    await updateDocumentStatus(documentId, "processing", 10, "Fetching document content")
-
-    // 1. Extract text from document
-    console.log(`Processing document: Fetching content`, { documentId, fileUrl })
-    const response = await fetch(fileUrl)
-    if (!response.ok) {
-      const errorMessage = `Failed to fetch document: ${response.status} ${response.statusText}`
-      console.error(errorMessage, { documentId, fileUrl })
-      await updateDocumentStatus(documentId, "failed", 0, errorMessage)
-      return { success: false, chunksProcessed: 0, vectorsInserted: 0, error: errorMessage }
+    // Check if document is already being processed (prevent duplicate processing)
+    if (!isRetry) {
+      const existingDoc = await getDocumentById(documentId)
+      if (existingDoc && existingDoc.status === "processing" && existingDoc.processing_progress > 0) {
+        logger.warn(
+          `Document ${documentId} is already being processed (progress: ${existingDoc.processing_progress}%). Skipping.`,
+        )
+        return {
+          success: false,
+          chunksProcessed: 0,
+          vectorsInserted: 0,
+          error: "Document is already being processed",
+          debugInfo: {
+            ...debugInfo,
+            existingStatus: existingDoc.status,
+            existingProgress: existingDoc.processing_progress,
+            skippedReason: "Already processing",
+          },
+        }
+      }
     }
 
+    // Update document status to processing
+    const fetchStartTime = performance.now()
+    await updateDocumentStatus(documentId, "processing", 10, "Fetching document content", {
+      ...debugInfo,
+      currentStep: "fetch_content",
+      processingStarted: true,
+    })
+    debugInfo.timings.statusUpdateTime = performance.now() - fetchStartTime
+
+    // 1. Extract text from document
+    logger.info(`Processing document: Fetching content`, {
+      documentId,
+      fileUrl,
+      isRetry,
+      fileName,
+      fileType,
+    })
+
+    let response
+    let retries = 0
+    let fetchSuccess = false
+    let fetchError = null
+
+    // Implement retry logic for fetching the document
+    const fetchContentStartTime = performance.now()
+    while (retries < MAX_RETRIES && !fetchSuccess) {
+      try {
+        response = await fetch(fileUrl, { cache: "no-store" })
+        if (response.ok) {
+          fetchSuccess = true
+          break
+        }
+
+        logger.warn(`Fetch attempt ${retries + 1} failed with status ${response.status}`, {
+          documentId,
+          fileUrl,
+          attempt: retries + 1,
+          maxRetries: MAX_RETRIES,
+          status: response.status,
+          statusText: response.statusText,
+        })
+
+        fetchError = `HTTP error: ${response.status} ${response.statusText}`
+
+        // Exponential backoff
+        const backoffTime = Math.pow(2, retries) * 1000
+        logger.info(`Backing off for ${backoffTime}ms before retry`, { documentId, retries })
+        await new Promise((resolve) => setTimeout(resolve, backoffTime))
+        retries++
+      } catch (fetchError) {
+        logger.error(`Fetch attempt ${retries + 1} failed with error`, {
+          documentId,
+          error: fetchError instanceof Error ? fetchError.message : "Unknown error",
+          attempt: retries + 1,
+          maxRetries: MAX_RETRIES,
+        })
+
+        if (retries >= MAX_RETRIES - 1) {
+          fetchError = fetchError instanceof Error ? fetchError.message : "Unknown fetch error"
+          break
+        }
+
+        // Exponential backoff
+        const backoffTime = Math.pow(2, retries) * 1000
+        logger.info(`Backing off for ${backoffTime}ms before retry`, { documentId, retries })
+        await new Promise((resolve) => setTimeout(resolve, backoffTime))
+        retries++
+      }
+    }
+
+    debugInfo.timings.fetchContentTime = performance.now() - fetchContentStartTime
+    debugInfo.steps.fetchContent = {
+      success: fetchSuccess,
+      retries,
+      error: fetchSuccess ? null : fetchError,
+      statusCode: response?.status,
+      contentType: response?.headers.get("content-type"),
+    }
+
+    if (!fetchSuccess) {
+      const errorMessage = `Failed to fetch document: ${fetchError || "Unknown error"}`
+      logger.error(errorMessage, { documentId, fileUrl, retries })
+
+      await updateDocumentStatus(documentId, "failed", 0, errorMessage, {
+        ...debugInfo,
+        error: errorMessage,
+        failedStep: "fetch_content",
+        processingEndTime: new Date().toISOString(),
+        totalDuration: performance.now() - startTime,
+      })
+
+      return {
+        success: false,
+        chunksProcessed: 0,
+        vectorsInserted: 0,
+        error: errorMessage,
+        debugInfo,
+      }
+    }
+
+    // Successfully fetched the document, now extract text
     const text = await response.text()
+    debugInfo.steps.fetchContent.contentLength = text.length
+    debugInfo.steps.fetchContent.contentPreview = text.substring(0, 200) + "..."
 
     // Validate content is not empty
     if (!text || text.trim() === "") {
       const errorMessage = "Document is empty or contains no valid text content"
-      console.error(errorMessage, { documentId, fileUrl })
-      await updateDocumentStatus(documentId, "failed", 0, errorMessage)
-      return { success: false, chunksProcessed: 0, vectorsInserted: 0, error: errorMessage }
+      logger.error(errorMessage, { documentId, fileUrl })
+
+      await updateDocumentStatus(documentId, "failed", 0, errorMessage, {
+        ...debugInfo,
+        error: errorMessage,
+        failedStep: "content_validation",
+        processingEndTime: new Date().toISOString(),
+        totalDuration: performance.now() - startTime,
+      })
+
+      return {
+        success: false,
+        chunksProcessed: 0,
+        vectorsInserted: 0,
+        error: errorMessage,
+        debugInfo,
+      }
     }
 
-    console.log(`Processing document: Content fetched successfully`, {
+    logger.info(`Processing document: Content fetched successfully`, {
       documentId,
       contentLength: text.length,
+      contentPreview: text.substring(0, 100) + "...",
     })
-    await updateDocumentStatus(documentId, "processing", 30, "Chunking document content")
+
+    await updateDocumentStatus(documentId, "processing", 30, "Chunking document content", {
+      ...debugInfo,
+      currentStep: "chunking",
+      contentLength: text.length,
+    })
 
     // 2. Split text into chunks
-    console.log(`Processing document: Chunking content`, { documentId })
-    const allChunks = chunkDocument(text, MAX_CHUNK_SIZE)
+    logger.info(`Processing document: Chunking content`, {
+      documentId,
+      contentLength: text.length,
+      maxChunkSize: MAX_CHUNK_SIZE,
+      chunkOverlap: CHUNK_OVERLAP,
+    })
+
+    const chunkingStartTime = performance.now()
+    const allChunks = chunkDocument(text, MAX_CHUNK_SIZE, CHUNK_OVERLAP)
+    debugInfo.timings.chunkingTime = performance.now() - chunkingStartTime
+
+    // DEBUGGING: Log chunks before filtering
+    logger.info(`Document chunks before filtering:`, {
+      documentId,
+      totalChunks: allChunks.length,
+      sampleChunk: allChunks.length > 0 ? allChunks[0].substring(0, 100) + "..." : "None",
+      chunkSizes: allChunks.slice(0, 5).map((chunk) => chunk.length),
+    })
 
     // Filter out non-informative chunks
+    const filteringStartTime = performance.now()
     const chunks = allChunks.filter((chunk) => isInformativeChunk(chunk))
+    debugInfo.timings.filteringTime = performance.now() - filteringStartTime
 
-    console.log(`Processing document: Chunking complete`, {
+    debugInfo.steps.chunking = {
+      success: true,
+      totalChunks: allChunks.length,
+      validChunks: chunks.length,
+      skippedChunks: allChunks.length - chunks.length,
+      averageChunkSize: chunks.length > 0 ? chunks.reduce((sum, chunk) => sum + chunk.length, 0) / chunks.length : 0,
+      chunkSizesHistogram: calculateChunkSizeHistogram(chunks),
+    }
+
+    // DEBUGGING: Log chunks after filtering
+    logger.info(`Document chunks after filtering:`, {
+      documentId,
+      validChunks: chunks.length,
+      sampleChunk: chunks.length > 0 ? chunks[0].substring(0, 100) + "..." : "None",
+      skippedChunks: allChunks.length - chunks.length,
+      filteringTime: debugInfo.timings.filteringTime.toFixed(2) + "ms",
+    })
+
+    logger.info(`Processing document: Chunking complete`, {
       documentId,
       totalChunks: allChunks.length,
       validChunks: chunks.length,
@@ -337,9 +510,23 @@ export async function processDocument({
     // Check if we have any valid chunks
     if (chunks.length === 0) {
       const errorMessage = "Document processing failed: No valid content chunks could be extracted"
-      console.error(errorMessage, { documentId, fileName })
-      await updateDocumentStatus(documentId, "failed", 0, errorMessage)
-      return { success: false, chunksProcessed: 0, vectorsInserted: 0, error: errorMessage }
+      logger.error(errorMessage, { documentId, fileName })
+
+      await updateDocumentStatus(documentId, "failed", 0, errorMessage, {
+        ...debugInfo,
+        error: errorMessage,
+        failedStep: "chunking",
+        processingEndTime: new Date().toISOString(),
+        totalDuration: performance.now() - startTime,
+      })
+
+      return {
+        success: false,
+        chunksProcessed: 0,
+        vectorsInserted: 0,
+        error: errorMessage,
+        debugInfo,
+      }
     }
 
     await updateDocumentStatus(
@@ -347,58 +534,112 @@ export async function processDocument({
       "processing",
       40,
       `Generating embeddings for ${chunks.length} chunks using ${EMBEDDING_MODEL}`,
+      {
+        ...debugInfo,
+        currentStep: "embedding",
+        chunkCount: chunks.length,
+        embeddingModel: EMBEDDING_MODEL,
+      },
     )
 
     // 3. Generate embeddings and store in Pinecone
-    const EMBEDDING_BATCH_SIZE = 20
     const UPSERT_BATCH_SIZE = 100
     let successfulEmbeddings = 0
     let failedEmbeddings = 0
     let totalVectorsInserted = 0
 
+    debugInfo.steps.embedding = {
+      batches: [],
+      totalBatches: Math.ceil(chunks.length / EMBEDDING_BATCH_SIZE),
+      successfulEmbeddings: 0,
+      failedEmbeddings: 0,
+      embeddingModel: EMBEDDING_MODEL,
+    }
+
     // Process chunks in batches for embedding generation
     for (let i = 0; i < chunks.length; i += EMBEDDING_BATCH_SIZE) {
+      const batchStartTime = performance.now()
       const batch = chunks.slice(i, i + EMBEDDING_BATCH_SIZE)
       const batchProgress = Math.floor(40 + (i / chunks.length) * 50)
+      const batchNumber = Math.floor(i / EMBEDDING_BATCH_SIZE) + 1
+      const totalBatches = Math.ceil(chunks.length / EMBEDDING_BATCH_SIZE)
 
       await updateDocumentStatus(
         documentId,
         "processing",
         batchProgress,
-        `Processing batch ${Math.floor(i / EMBEDDING_BATCH_SIZE) + 1}/${Math.ceil(chunks.length / EMBEDDING_BATCH_SIZE)}`,
+        `Processing batch ${batchNumber}/${totalBatches}`,
+        {
+          ...debugInfo,
+          currentStep: "embedding",
+          currentBatch: batchNumber,
+          totalBatches,
+          progress: batchProgress,
+        },
       )
 
-      console.log(`Processing document: Generating embeddings for batch`, {
+      logger.info(`Processing document: Generating embeddings for batch`, {
         documentId,
-        batchNumber: Math.floor(i / EMBEDDING_BATCH_SIZE) + 1,
+        batchNumber,
+        totalBatches,
         batchSize: batch.length,
         progress: `${batchProgress}%`,
       })
 
+      const batchInfo = {
+        batchNumber,
+        startIndex: i,
+        endIndex: i + batch.length - 1,
+        chunkCount: batch.length,
+        success: false,
+        embeddingResults: [],
+        errors: [],
+        startTime: new Date().toISOString(),
+        duration: 0,
+      }
+
       // Generate embeddings for this batch
+      const embeddingStartTime = performance.now()
       const embeddingPromises = batch.map(async (chunk, index) => {
         try {
           // Skip empty or whitespace-only chunks
           if (!chunk || chunk.trim() === "") {
-            console.log("Skipping empty chunk", { documentId, chunkIndex: i + index })
+            logger.info("Skipping empty chunk", { documentId, chunkIndex: i + index })
             failedEmbeddings++
+            batchInfo.errors.push({
+              chunkIndex: i + index,
+              error: "Empty chunk",
+            })
             return null
           }
 
+          const chunkEmbeddingStartTime = performance.now()
           const embedding = await generateEmbedding(chunk)
+          const chunkEmbeddingTime = performance.now() - chunkEmbeddingStartTime
 
           // Validate embedding is not all zeros
           if (embedding.every((v) => v === 0)) {
-            console.error("Skipping zero-vector embedding", {
+            logger.error("Skipping zero-vector embedding", {
               documentId,
               chunkIndex: i + index,
               chunkSample: chunk.substring(0, 50) + "...",
             })
             failedEmbeddings++
+            batchInfo.errors.push({
+              chunkIndex: i + index,
+              error: "Zero-vector embedding",
+              chunkSample: chunk.substring(0, 50) + "...",
+            })
             return null
           }
 
           successfulEmbeddings++
+          batchInfo.embeddingResults.push({
+            chunkIndex: i + index,
+            embeddingDimension: embedding.length,
+            embeddingTime: chunkEmbeddingTime,
+          })
+
           return {
             id: `chunk_${documentId}_${i + index}`,
             values: embedding,
@@ -411,104 +652,248 @@ export async function processDocument({
               index: i + index,
               record_type: "chunk",
               created_at: new Date().toISOString(),
+              embedding_time_ms: chunkEmbeddingTime,
             },
           }
         } catch (error) {
-          console.error(`Error generating embedding for chunk:`, {
+          const errorMessage = error instanceof Error ? error.message : "Unknown error"
+          logger.error(`Error generating embedding for chunk:`, {
             documentId,
             chunkIndex: i + index,
-            error: error instanceof Error ? error.message : "Unknown error",
+            error: errorMessage,
             chunkSample: chunk.substring(0, 100) + "...",
           })
+
+          // Check for specific error types
+          let errorType = "unknown"
+          if (errorMessage.includes("rate limit")) {
+            errorType = "rate_limit"
+          } else if (errorMessage.includes("dimension mismatch")) {
+            errorType = "dimension_mismatch"
+          } else if (errorMessage.includes("timeout")) {
+            errorType = "timeout"
+          }
+
           failedEmbeddings++
+          batchInfo.errors.push({
+            chunkIndex: i + index,
+            error: errorMessage,
+            errorType,
+            chunkSample: chunk.substring(0, 100) + "...",
+          })
+
           return null
         }
       })
 
-      const embeddingResults = await Promise.all(embeddingPromises)
+      debugInfo.timings.embeddingTime =
+        (debugInfo.timings.embeddingTime || 0) + (performance.now() - embeddingStartTime)
 
-      // Filter out null results (failed embeddings)
-      const embeddings = embeddingResults.filter((result) => result !== null) as any[]
+      try {
+        const embeddingResults = await Promise.all(embeddingPromises)
 
-      if (embeddings.length > 0) {
-        // Store embeddings in Pinecone in batches of 100
-        for (let j = 0; j < embeddings.length; j += UPSERT_BATCH_SIZE) {
-          const upsertBatch = embeddings.slice(j, j + UPSERT_BATCH_SIZE)
+        // Filter out null results (failed embeddings)
+        const embeddings = embeddingResults.filter((result) => result !== null) as any[]
 
-          console.log(`Processing document: Upserting vectors to Pinecone`, {
-            documentId,
-            batchNumber: Math.floor(i / EMBEDDING_BATCH_SIZE) + 1,
-            upsertBatchNumber: Math.floor(j / UPSERT_BATCH_SIZE) + 1,
-            vectorCount: upsertBatch.length,
-          })
+        batchInfo.success = embeddings.length > 0
+        batchInfo.successfulEmbeddings = embeddings.length
+        batchInfo.failedEmbeddings = batch.length - embeddings.length
 
-          try {
-            const upsertResult = await upsertVectors(upsertBatch)
-            totalVectorsInserted += upsertBatch.length
+        if (embeddings.length > 0) {
+          // Store embeddings in Pinecone in batches of UPSERT_BATCH_SIZE
+          for (let j = 0; j < embeddings.length; j += UPSERT_BATCH_SIZE) {
+            const upsertBatch = embeddings.slice(j, j + UPSERT_BATCH_SIZE)
+            const upsertBatchNumber = Math.floor(j / UPSERT_BATCH_SIZE) + 1
+            const upsertStartTime = performance.now()
 
-            console.log(`Processing document: Vectors upserted successfully`, {
+            logger.info(`Processing document: Upserting vectors to Pinecone`, {
               documentId,
-              batchNumber: Math.floor(i / EMBEDDING_BATCH_SIZE) + 1,
-              upsertBatchNumber: Math.floor(j / UPSERT_BATCH_SIZE) + 1,
-              vectorsInserted: upsertBatch.length,
-              upsertResult,
+              batchNumber,
+              upsertBatchNumber,
+              vectorCount: upsertBatch.length,
             })
-          } catch (upsertError) {
-            console.error(`Error upserting vectors to Pinecone`, {
-              documentId,
-              batchNumber: Math.floor(i / EMBEDDING_BATCH_SIZE) + 1,
-              upsertBatchNumber: Math.floor(j / UPSERT_BATCH_SIZE) + 1,
-              error: upsertError instanceof Error ? upsertError.message : "Unknown error",
-            })
-            failedEmbeddings += upsertBatch.length
+
+            try {
+              const upsertResult = await upsertVectors(upsertBatch)
+              const upsertTime = performance.now() - upsertStartTime
+              totalVectorsInserted += upsertResult.upsertedCount || upsertBatch.length
+
+              batchInfo.upsertResults = batchInfo.upsertResults || []
+              batchInfo.upsertResults.push({
+                upsertBatchNumber,
+                vectorCount: upsertBatch.length,
+                upsertedCount: upsertResult.upsertedCount || upsertBatch.length,
+                upsertTime,
+              })
+
+              logger.info(`Processing document: Vectors upserted successfully`, {
+                documentId,
+                batchNumber,
+                upsertBatchNumber,
+                vectorsInserted: upsertResult.upsertedCount || upsertBatch.length,
+                upsertTime: `${upsertTime.toFixed(2)}ms`,
+              })
+            } catch (upsertError) {
+              const errorMessage = upsertError instanceof Error ? upsertError.message : "Unknown error"
+              logger.error(`Error upserting vectors to Pinecone`, {
+                documentId,
+                batchNumber,
+                upsertBatchNumber,
+                error: errorMessage,
+              })
+
+              // Check for specific error types
+              let errorType = "unknown"
+              if (errorMessage.includes("rate limit")) {
+                errorType = "rate_limit"
+              } else if (errorMessage.includes("dimension mismatch")) {
+                errorType = "dimension_mismatch"
+              } else if (errorMessage.includes("timeout")) {
+                errorType = "timeout"
+              }
+
+              batchInfo.upsertErrors = batchInfo.upsertErrors || []
+              batchInfo.upsertErrors.push({
+                upsertBatchNumber,
+                vectorCount: upsertBatch.length,
+                error: errorMessage,
+                errorType,
+              })
+
+              failedEmbeddings += upsertBatch.length
+            }
           }
+        } else {
+          logger.warn(`Processing document: No valid embeddings in batch`, {
+            documentId,
+            batchNumber,
+          })
         }
-      } else {
-        console.warn(`Processing document: No valid embeddings in batch`, {
+      } catch (batchError) {
+        const errorMessage = batchError instanceof Error ? batchError.message : "Unknown error"
+        logger.error(`Error processing embedding batch`, {
           documentId,
-          batchNumber: Math.floor(i / EMBEDDING_BATCH_SIZE) + 1,
+          batchNumber,
+          error: errorMessage,
         })
+
+        batchInfo.success = false
+        batchInfo.batchError = errorMessage
+
+        // Continue with the next batch even if this one failed
       }
+
+      batchInfo.duration = performance.now() - batchStartTime
+      batchInfo.endTime = new Date().toISOString()
+      debugInfo.steps.embedding.batches.push(batchInfo)
     }
+
+    debugInfo.steps.embedding.successfulEmbeddings = successfulEmbeddings
+    debugInfo.steps.embedding.failedEmbeddings = failedEmbeddings
+    debugInfo.steps.embedding.totalVectorsInserted = totalVectorsInserted
 
     // 4. Update document status based on embedding results
     if (successfulEmbeddings === 0) {
       const errorMessage = `Document processing failed: Could not generate any valid embeddings from ${chunks.length} chunks`
-      console.error(errorMessage, { documentId })
-      await updateDocumentStatus(documentId, "failed", 0, errorMessage)
+      logger.error(errorMessage, { documentId })
+
+      await updateDocumentStatus(documentId, "failed", 0, errorMessage, {
+        ...debugInfo,
+        error: errorMessage,
+        failedStep: "embedding",
+        processingEndTime: new Date().toISOString(),
+        totalDuration: performance.now() - startTime,
+      })
+
       return {
         success: false,
         chunksProcessed: chunks.length,
         vectorsInserted: 0,
         error: errorMessage,
+        debugInfo,
       }
     }
 
-    // Mark document as indexed
-    await updateDocumentStatus(documentId, "indexed", 100)
+    // Also update document with chunk count metadata
+    const finalUpdateStartTime = performance.now()
+    const placeholderVector = createPlaceholderVector()
 
-    console.log(`Processing document: Complete`, {
+    debugInfo.processingEndTime = new Date().toISOString()
+    debugInfo.totalDuration = performance.now() - startTime
+    debugInfo.finalStatus = "indexed"
+
+    await upsertVectors([
+      {
+        id: documentId, // Use consistent ID pattern with no prefix
+        values: placeholderVector,
+        metadata: {
+          id: documentId,
+          user_id: userId,
+          name: fileName,
+          file_type: fileType,
+          file_size: text.length,
+          file_path: filePath,
+          status: "indexed",
+          processing_progress: 100,
+          chunk_count: successfulEmbeddings,
+          embedding_model: EMBEDDING_MODEL,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          record_type: "document",
+          debug_info: debugInfo,
+        },
+      },
+    ])
+
+    debugInfo.timings.finalUpdateTime = performance.now() - finalUpdateStartTime
+
+    logger.info(`Processing document: Complete`, {
       documentId,
       totalChunks: chunks.length,
       successfulEmbeddings,
       failedEmbeddings,
       totalVectorsInserted,
+      totalDuration: debugInfo.totalDuration.toFixed(2) + "ms",
     })
 
     return {
       success: true,
       chunksProcessed: chunks.length,
       vectorsInserted: totalVectorsInserted,
+      debugInfo,
     }
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : "Unknown error occurred"
-    console.error("Error processing document:", error, { documentId })
+    const errorMessage = error instanceof Error ? error.message : "Unknown error"
+    logger.error("Error processing document:", {
+      error: errorMessage,
+      stack: error instanceof Error ? error.stack : undefined,
+      documentId,
+    })
+
+    // Detect specific error types
+    let errorType = "unknown"
+    if (errorMessage.includes("rate limit")) {
+      errorType = "rate_limit"
+    } else if (errorMessage.includes("dimension mismatch")) {
+      errorType = "dimension_mismatch"
+    } else if (errorMessage.includes("timeout")) {
+      errorType = "timeout"
+    } else if (errorMessage.includes("fetch")) {
+      errorType = "fetch_error"
+    }
+
+    debugInfo.processingEndTime = new Date().toISOString()
+    debugInfo.totalDuration = performance.now() - startTime
+    debugInfo.error = errorMessage
+    debugInfo.errorType = errorType
+    debugInfo.errorStack = error instanceof Error ? error.stack : undefined
+    debugInfo.finalStatus = "failed"
 
     // Update document status to failed
     try {
-      await updateDocumentStatus(documentId, "failed", 0, errorMessage)
+      await updateDocumentStatus(documentId, "failed", 0, errorMessage, debugInfo)
     } catch (statusError) {
-      console.error("Failed to update document status after error:", statusError)
+      logger.error("Failed to update document status after error:", statusError)
     }
 
     return {
@@ -516,16 +901,50 @@ export async function processDocument({
       chunksProcessed: 0,
       vectorsInserted: 0,
       error: errorMessage,
+      debugInfo,
     }
   }
 }
 
 /**
+ * Deletes a document and all its chunks
+ *
+ * @param id - Document ID
+ */
+export async function deleteDocument(id: string): Promise<void> {
+  // Delete the document
+  await deleteVectors([id]) // Use consistent ID pattern with no prefix
+
+  // Create a placeholder vector with small non-zero values
+  const placeholderVector = createPlaceholderVector()
+
+  // Find all chunks for this document
+  const response = await queryVectors(placeholderVector, 1000, true, {
+    document_id: { $eq: id },
+    record_type: { $eq: "chunk" },
+  })
+
+  // Delete all chunks
+  if (response.matches && response.matches.length > 0) {
+    const chunkIds = response.matches.map((match) => match.id)
+    await deleteVectors(chunkIds)
+  }
+}
+
+/**
  * Validates if a chunk is informative enough to be embedded
+ *
+ * @param text - Chunk text content
+ * @returns True if chunk is informative
  */
 function isInformativeChunk(text: string): boolean {
   if (!text || text.trim() === "") {
     return false
+  }
+
+  // ENHANCED: Less restrictive check for markdown content
+  if (text.includes("#") || text.includes("|") || text.includes("```")) {
+    return true // Consider markdown headings, tables, and code blocks as informative
   }
 
   // Skip chunks that are too short
@@ -546,4 +965,33 @@ function isInformativeChunk(text: string): boolean {
   }
 
   return true
+}
+
+/**
+ * Calculate histogram of chunk sizes for debugging
+ *
+ * @param chunks - Array of text chunks
+ * @returns Histogram object with size ranges and counts
+ */
+function calculateChunkSizeHistogram(chunks: string[]): Record<string, number> {
+  const histogram: Record<string, number> = {
+    "0-100": 0,
+    "101-250": 0,
+    "251-500": 0,
+    "501-750": 0,
+    "751-1000": 0,
+    "1001+": 0,
+  }
+
+  chunks.forEach((chunk) => {
+    const size = chunk.length
+    if (size <= 100) histogram["0-100"]++
+    else if (size <= 250) histogram["101-250"]++
+    else if (size <= 500) histogram["251-500"]++
+    else if (size <= 750) histogram["501-750"]++
+    else if (size <= 1000) histogram["751-1000"]++
+    else histogram["1001+"]++
+  })
+
+  return histogram
 }

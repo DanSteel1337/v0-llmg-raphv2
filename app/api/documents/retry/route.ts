@@ -3,9 +3,19 @@
  *
  * Allows manual retrying of document processing for failed documents.
  * Validates document existence and status before triggering reprocessing.
- *
- * Endpoint: POST /api/documents/retry
- * Body: { documentId: string }
+ * 
+ * IMPORTANT:
+ * - ALWAYS declare runtime = "edge" for compatibility with Vercel Edge
+ * - ALWAYS check document exists before attempting to retry
+ * - NEVER retry documents that are already processing
+ * - ALWAYS return { success: true/false } in responses
+ * - Use background processing pattern to handle long-running tasks
+ * 
+ * Dependencies:
+ * - @/lib/document-service for document operations
+ * - @/lib/utils/logger for structured logging
+ * 
+ * @module app/api/documents/retry/route
  */
 
 import type { NextRequest } from "next/server"

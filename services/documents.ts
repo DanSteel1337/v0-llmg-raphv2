@@ -1,15 +1,22 @@
-// services/documents.ts
-
 /**
- * Document service for creating and managing documents
+ * Document Service
  * 
- * This service handles document metadata creation and persistence in Pinecone.
- * It implements server-side document operations compatible with Edge runtime.
+ * Service for creating and managing document metadata in Pinecone.
+ * Implements server-side document operations compatible with Edge runtime.
+ * 
+ * IMPORTANT:
+ * - ALWAYS use consistent document ID format: `doc_${timestamp}_${random}`
+ * - NEVER use prefixes (like 'meta_') when storing IDs in Pinecone
+ * - ALWAYS use createPlaceholderVector() instead of zero vectors
+ * - ALWAYS use record_type: "document" for consistent filtering
+ * - Document status should be one of: "processing", "indexed", "failed"
  * 
  * Dependencies:
- * - @/lib/utils/logger for consistent logging
- * - @/lib/pinecone-rest-client for Pinecone vector operations
+ * - @/lib/utils/logger for structured logging
+ * - @/lib/pinecone-rest-client for vector database operations
  * - uuid for generating unique IDs
+ * 
+ * @module services/documents
  */
 
 import { v4 as uuidv4 } from "uuid"
@@ -33,11 +40,13 @@ export const createDocument = async (params: {
 }): Promise<Document> => {
   const { userId, name, fileType, fileSize, filePath } = params
 
-  // Generate a unique document ID
-  const documentId = `doc_${uuidv4()}`
+  // Generate a unique document ID with timestamp for better ordering
+  const timestamp = Date.now()
+  const random = Math.floor(Math.random() * 10000)
+  const documentId = `doc_${timestamp}_${random}`
   
   // Capture current timestamp for created_at/updated_at
-  const timestamp = new Date().toISOString()
+  const now = new Date().toISOString()
 
   // Create document metadata
   const document: Document = {
@@ -48,10 +57,10 @@ export const createDocument = async (params: {
     file_size: fileSize,
     file_path: filePath,
     status: "processing", // FIXED: Changed from "created" to "processing"
-    created_at: timestamp,
-    updated_at: timestamp,
-    chunk_count: 0,
-    embedding_model: "text-embedding-3-large",
+    processing_progress: 0,
+    created_at: now,
+    updated_at: now,
+    error_message: undefined,
   }
 
   logger.info("Creating new document", { 

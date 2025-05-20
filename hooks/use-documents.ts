@@ -3,6 +3,19 @@
  *
  * Custom hook for document management operations.
  * Provides functionality for listing, uploading, deleting, and retrying document processing.
+ * 
+ * IMPORTANT:
+ * - Always use consistent error handling and response formats
+ * - Document IDs should follow the `doc_${timestamp}_${random}` pattern
+ * - Only make direct fetch calls from server-side code
+ * - All client-side operations should go through API endpoints
+ * - Always update local state optimistically when possible
+ * 
+ * Dependencies:
+ * - Fetch API for network requests
+ * - React hooks for state management
+ * 
+ * @module hooks/use-documents
  */
 
 "use client"
@@ -66,31 +79,121 @@ export function useDocuments(userId?: string) {
         formData.append("file", file)
         formData.append("userId", userId)
 
-        const response = await fetch("/api/documents/upload", {
+        // First, create the document metadata
+        const createResponse = await fetch("/api/documents", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            userId,
+            name: file.name,
+            fileType: file.type || "text/plain",
+            fileSize: file.size,
+            filePath: `${userId}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`,
+          }),
+        })
+
+        if (!createResponse.ok) {
+          const errorData = await createResponse.json().catch(() => ({}))
+          throw new Error(errorData.error || `Failed to create document: ${createResponse.status}`)
+        }
+
+        const createResult = await createResponse.json()
+        
+        if (!createResult.success) {
+          throw new Error(createResult.error || "Failed to create document metadata")
+        }
+
+        const document = createResult.document
+        if (!document?.id) {
+          throw new Error("Invalid document response - missing document ID")
+        }
+
+        // Next, upload the file content
+        formData.append("documentId", document.id)
+        formData.append("filePath", document.file_path)
+
+        const uploadResponse = await fetch("/api/documents/upload", {
           method: "POST",
           body: formData,
         })
 
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}))
-          throw new Error(errorData.error || `Upload failed with status: ${response.status}`)
+        if (!uploadResponse.ok) {
+          const errorData = await uploadResponse.json().catch(() => ({}))
+          throw new Error(errorData.error || `Upload failed with status: ${uploadResponse.status}`)
         }
 
-        const result = await response.json()
+        const uploadResult = await uploadResponse.json()
 
-        if (!result.success) {
-          throw new Error(result.error || "Upload failed")
+        if (!uploadResult.success) {
+          throw new Error(uploadResult.error || "Upload failed")
+        }
+
+        const fileUrl = uploadResult.fileUrl || `/api/documents/file?path=${encodeURIComponent(document.file_path)}`
+
+        // Finally, trigger the document processing
+        const processResponse = await fetch("/api/documents/process", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            documentId: document.id,
+            userId,
+            filePath: document.file_path,
+            fileName: file.name,
+            fileType: file.type || "text/plain",
+            fileUrl,
+          }),
+        })
+
+        if (!processResponse.ok) {
+          const errorData = await processResponse.json().catch(() => ({}))
+          throw new Error(errorData.error || `Processing failed with status: ${processResponse.status}`)
+        }
+
+        const processResult = await processResponse.json()
+
+        if (!processResult.success) {
+          throw new Error(processResult.error || "Failed to start document processing")
+        }
+
+        // Update local state to include the new document
+        setDocuments((prevDocuments) => [document, ...prevDocuments])
+
+        // Poll for document status updates if progress callback provided
+        if (onProgress) {
+          const pollInterval = setInterval(async () => {
+            try {
+              await fetchDocuments()
+              const updatedDocument = documents.find((d) => d.id === document.id)
+
+              if (updatedDocument) {
+                if (updatedDocument.status === "indexed" || updatedDocument.status === "failed") {
+                  clearInterval(pollInterval)
+                  onProgress(updatedDocument.status === "indexed" ? 100 : 0)
+                } else if (updatedDocument.processing_progress !== undefined) {
+                  onProgress(updatedDocument.processing_progress)
+                }
+              }
+            } catch (error) {
+              console.error("Error polling document status:", error)
+            }
+          }, 2000)
+
+          // Clean up interval after 5 minutes (max processing time)
+          setTimeout(() => clearInterval(pollInterval), 5 * 60 * 1000)
         }
 
         await fetchDocuments()
-
-        return result.document
+        return document
       } catch (err) {
         console.error("Error uploading document:", err)
         throw err instanceof Error ? err : new Error(String(err))
       }
     },
-    [userId, fetchDocuments]
+    [userId, fetchDocuments, documents]
   )
 
   const deleteDocument = useCallback(
@@ -111,9 +214,9 @@ export function useDocuments(userId?: string) {
 
         // Update local state to remove the deleted document
         setDocuments((prevDocuments) => prevDocuments.filter((doc) => doc.id !== documentId))
-      } catch (err) {
-        console.error("Error deleting document:", err)
-        throw err instanceof Error ? err : new Error(String(err))
+      } catch (error) {
+        console.error("Error deleting document:", error)
+        throw error instanceof Error ? error : new Error(String(error))
       }
     },
     []

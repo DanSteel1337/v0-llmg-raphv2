@@ -1,4 +1,20 @@
 /**
+ * API Call Utility
+ *
+ * Standard utility for making API calls with consistent error handling.
+ * Ensures all API calls follow the same response format and error patterns.
+ * 
+ * IMPORTANT:
+ * - ALWAYS check for success property in responses
+ * - ALWAYS handle network errors properly
+ * - ALWAYS validate response body
+ * - ALWAYS log detailed error information for debugging
+ * - NEVER expose sensitive information in logs
+ * 
+ * @module services/apiCall
+ */
+
+/**
  * Make an API call with standardized error handling
  *
  * @param url API endpoint URL
