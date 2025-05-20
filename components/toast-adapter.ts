@@ -3,14 +3,14 @@
 /**
  * Toast Adapter
  *
- * This adapter provides a compatibility layer for different toast usage patterns.
- * It allows components to use the toast functionality in a more flexible way.
+ * This adapter provides compatibility between different toast usage patterns
+ * in the application. It supports both string-style and object-style toast calls.
  */
 
-import { useToast } from "@/components/toast"
+import { useToast } from "./toast"
 
-// Type definitions for the toast parameters
-export interface ToastParams {
+// Type for object-style toast parameters
+interface ToastParams {
   title?: string
   description?: string
   variant?: "default" | "destructive"
@@ -18,12 +18,16 @@ export interface ToastParams {
 }
 
 /**
- * Hook that provides a toast function compatible with both object-style and string-style usage
+ * Toast adapter hook that provides compatibility with different toast usage patterns
  */
 export function useToastAdapter() {
   const { addToast } = useToast()
 
-  // Create a toast function that can handle both styles of usage
+  /**
+   * Unified toast function that supports both styles:
+   * - String style: toast("Message", "success")
+   * - Object style: toast({ title: "Title", description: "Description", variant: "default" })
+   */
   const toast = (params: ToastParams | string, type?: "success" | "error" | "info" | "warning") => {
     if (typeof params === "string") {
       // String style: toast("Message", "success")
@@ -37,5 +41,5 @@ export function useToastAdapter() {
     }
   }
 
-  return { toast }
+  return { toast, addToast }
 }
