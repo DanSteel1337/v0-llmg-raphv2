@@ -104,46 +104,64 @@ export function useChat(userId: string, initialConversationId?: string) {
 
   // Send a message with validation and error handling
   const sendMessage = async (content: string) => {
+    // Enhanced validation
     if (!activeConversationId) {
-      console.error("Cannot send message: No active conversation")
-      throw new Error("No active conversation")
+      console.error("Cannot send message: No active conversation");
+      throw new Error("No active conversation");
     }
 
     if (!safeUserId) {
-      console.error("Cannot send message: No user ID")
-      throw new Error("User ID is required to send a message")
+      console.error("Cannot send message: No user ID");
+      throw new Error("User ID is required to send a message");
     }
 
-    if (!content || content.trim() === "") {
-      console.error("Cannot send message: Empty content")
-      throw new Error("Message content cannot be empty")
+    if (!content || typeof content !== 'string' || content.trim() === "") {
+      console.error("Cannot send message: Empty content", { 
+        contentType: typeof content,
+        contentLength: typeof content === 'string' ? content.length : 0
+      });
+      throw new Error("Message content cannot be empty");
     }
 
-    setIsTyping(true)
+    setIsTyping(true);
 
     try {
-      console.log(`Sending message to conversation: ${activeConversationId}`)
-      await apiSendMessage(activeConversationId, content, safeUserId)
+      console.log(`Sending message to conversation: ${activeConversationId}`);
+      
+      // Log the exact message being sent
+      console.log('Sending message with exact content:', {
+        conversationId: activeConversationId,
+        content, // Log full content
+        contentLength: content.length,
+        userId: safeUserId
+      });
+      
+      await apiSendMessage(activeConversationId, content, safeUserId);
       
       // Reload messages to get the new message and response
-      await loadMessages()
-      setRetryCount(0) // Reset retry count on success
-      return true
+      await loadMessages();
+      setRetryCount(0); // Reset retry count on success
+      return true;
     } catch (error) {
-      console.error("Error sending message:", error)
+      console.error("Error sending message:", {
+        error: error instanceof Error ? error.message : String(error),
+        conversationId: activeConversationId,
+        contentType: typeof content,
+        contentLength: content.length
+      });
       
       // Implement retry logic for transient errors
       if (retryCount < 2) {
-        console.log(`Retrying send message (${retryCount + 1}/2)...`)
-        setRetryCount(prev => prev + 1)
+        console.log(`Retrying send message (${retryCount + 1}/2)...`);
+        setRetryCount(prev => prev + 1);
         // Wait briefly before retrying
-        await new Promise(resolve => setTimeout(resolve, 1000))
-        return sendMessage(content)
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        return sendMessage(content);
       }
       
-      throw error
+      throw error;
     } finally {
-      setIsTyping(false)
+      setIsTyping(false);
     }
   }
 

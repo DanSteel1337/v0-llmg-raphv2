@@ -34,8 +34,28 @@ const MAX_TEXT_LENGTH = 25000
  * @returns Vector embedding as number array
  */
 export async function generateEmbedding(text: string, retryCount = 0): Promise<number[]> {
-  if (!text || typeof text !== "string") {
-    throw new Error("Invalid text provided for embedding generation")
+  // Enhanced validation for text input
+  if (text === undefined || text === null) {
+    logger.error("Invalid text provided for embedding generation - null or undefined", {
+      textValue: text === undefined ? "undefined" : "null",
+    });
+    throw new Error("Invalid text provided for embedding generation: text is null or undefined");
+  }
+  
+  if (typeof text !== "string") {
+    logger.error("Invalid text provided for embedding generation - not a string", {
+      textType: typeof text,
+      textValue: String(text).substring(0, 100)
+    });
+    throw new Error(`Invalid text provided for embedding generation: expected string, got ${typeof text}`);
+  }
+  
+  if (text.trim() === "") {
+    logger.error("Invalid text provided for embedding generation - empty string", {
+      textLength: text.length,
+      textValue: text
+    });
+    throw new Error("Invalid text provided for embedding generation: text is empty");
   }
 
   try {
@@ -126,6 +146,7 @@ export async function generateEmbedding(text: string, retryCount = 0): Promise<n
       logger.error("Error generating embedding after max retries", {
         error: error instanceof Error ? error.message : "Unknown error",
         textLength: text.length,
+        textSample: text.substring(0, 100) + "...",
         retries: retryCount
       })
       throw error
@@ -154,8 +175,50 @@ export async function generateEmbedding(text: string, retryCount = 0): Promise<n
  * @returns Array of vector embeddings
  */
 export async function generateEmbeddings(texts: string[]): Promise<number[][]> {
-  if (!Array.isArray(texts) || texts.length === 0) {
-    throw new Error("Invalid texts array provided for embedding generation")
+  if (!Array.isArray(texts)) {
+    logger.error("Invalid texts array provided for embedding generation", {
+      textsType: typeof texts,
+    });
+    throw new Error("Invalid texts array provided for embedding generation: not an array");
+  }
+  
+  if (texts.length === 0) {
+    logger.error("Empty texts array provided for embedding generation");
+    throw new Error("Invalid texts array provided for embedding generation: empty array");
+  }
+  
+  // Validate all texts before processing
+  const invalidTexts = texts.filter(text => 
+    text === undefined || 
+    text === null || 
+    typeof text !== 'string' || 
+    text.trim() === ''
+  );
+  
+  if (invalidTexts.length > 0) {
+    logger.error("Invalid texts in array for embedding generation", {
+      invalidCount: invalidTexts.length,
+      examples: invalidTexts.slice(0, 3).map(t => 
+        t === undefined ? 'undefined' : 
+        t === null ? 'null' : 
+        typeof t !== 'string' ? typeof t : 
+        'empty string'
+      )
+    });
+    
+    // Filter out invalid texts instead of failing
+    texts = texts.filter(text => 
+      text !== undefined && 
+      text !== null && 
+      typeof text === 'string' && 
+      text.trim() !== ''
+    );
+    
+    if (texts.length === 0) {
+      throw new Error("All texts in the array are invalid for embedding generation");
+    }
+    
+    logger.warn(`Filtered out ${invalidTexts.length} invalid texts, proceeding with ${texts.length} valid texts`);
   }
 
   // Process in batches to avoid rate limits

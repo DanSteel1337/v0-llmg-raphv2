@@ -383,8 +383,13 @@ export async function fetchMessages(conversationId: string): Promise<Message[]> 
  * @returns Created message object
  */
 export async function sendMessage(conversationId: string, content: string, userId: string): Promise<Message> {
+  // Enhanced validation
   if (!conversationId) throw new Error("Conversation ID is required");
-  if (!content || content.trim() === "") throw new Error("Message content cannot be empty");
+  
+  if (!content || typeof content !== 'string' || content.trim() === "") {
+    throw new Error("Message content cannot be empty");
+  }
+  
   if (!userId) throw new Error("User ID is required");
   
   const requestBody = { conversationId, content, userId };
@@ -394,20 +399,31 @@ export async function sendMessage(conversationId: string, content: string, userI
     userId 
   });
   
-  const response = await apiCall<{ message: Message }>("/api/chat/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(requestBody),
-  });
+  try {
+    const response = await apiCall<{ message: Message }>("/api/chat/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+    });
 
-  if (!response?.message) {
-    console.error("Invalid response from sendMessage:", response);
-    throw new Error("Failed to send message: Invalid response from server");
+    if (!response?.message) {
+      console.error("Invalid response from sendMessage:", response);
+      throw new Error("Failed to send message: Invalid response from server");
+    }
+
+    return response.message;
+  } catch (error) {
+    // Enhanced error logging
+    console.error("Error sending chat message:", {
+      error: error instanceof Error ? error.message : "Unknown error",
+      conversationId,
+      contentLength: content.length,
+      userId
+    });
+    throw error;
   }
-
-  return response.message;
 }
 
 /**
