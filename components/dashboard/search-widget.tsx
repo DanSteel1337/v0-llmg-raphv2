@@ -17,17 +17,29 @@ import { Search, Clock, AlertCircle, RefreshCw, FileText } from "lucide-react"
 import { DashboardCard } from "@/components/ui/dashboard-card"
 import { useToast } from "@/components/toast"
 import { useSearch } from "@/hooks/use-search"
+import type { SearchOptions } from "@/types"
 
 interface SearchWidgetProps {
   userId: string
 }
 
+// Default search options to use as fallback
+const defaultSearchOptions: SearchOptions = {
+  type: "semantic",
+  documentTypes: [],
+  sortBy: "relevance",
+  dateRange: undefined,
+}
+
 export function SearchWidget({ userId }: SearchWidgetProps) {
   const [query, setQuery] = useState("")
   const [debouncedQuery, setDebouncedQuery] = useState("")
-  const { search, results, isLoading, error, setSearchOptions, searchOptions, recentSearches } = useSearch(userId)
+  const { search, results, isLoading, error, recentSearches } = useSearch(userId)
   const { addToast } = useToast()
   const [searchError, setSearchError] = useState<string | null>(null)
+
+  // Initialize local search options state
+  const [searchOptions, setSearchOptions] = useState<SearchOptions>(defaultSearchOptions)
 
   // Ensure results is always an array
   const safeResults = Array.isArray(results) ? results : []
@@ -54,16 +66,16 @@ export function SearchWidget({ userId }: SearchWidgetProps) {
   const handleSearchTypeChange = (type: "semantic" | "keyword" | "hybrid") => {
     setSearchOptions({ ...searchOptions, type })
     if (debouncedQuery.trim()) {
-      handleSearch(debouncedQuery)
+      handleSearch(debouncedQuery, { ...searchOptions, type })
     }
   }
 
-  const handleSearch = async (searchQuery: string) => {
+  const handleSearch = async (searchQuery: string, options = searchOptions) => {
     if (!searchQuery.trim()) return
 
     setSearchError(null)
     try {
-      await search(searchQuery)
+      await search(searchQuery, options)
     } catch (error) {
       console.error("Search failed:", error)
       setSearchError(error instanceof Error ? error.message : "Search failed. Please try again.")

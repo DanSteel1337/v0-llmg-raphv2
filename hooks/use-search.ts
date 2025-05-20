@@ -51,7 +51,7 @@ export function useSearch(userId: string) {
 
   // Perform search
   const search = useCallback(
-    async (searchQuery: string) => {
+    async (searchQuery: string, options: SearchOptions = defaultSearchOptions) => {
       if (!userId || !searchQuery.trim()) {
         return
       }
@@ -61,7 +61,7 @@ export function useSearch(userId: string) {
       setQuery(searchQuery)
 
       try {
-        const searchResults = await searchDocuments(searchQuery, userId, defaultSearchOptions)
+        const searchResults = await searchDocuments(searchQuery, userId, options)
         setResults(searchResults)
         return searchResults
       } catch (err) {
@@ -74,7 +74,7 @@ export function useSearch(userId: string) {
         setIsLoading(false)
       }
     },
-    [userId],
+    [userId, addToast],
   )
 
   // Clear search results
