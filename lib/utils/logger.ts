@@ -1,55 +1,73 @@
 /**
  * Logger Utility
  *
- * Provides standardized logging functions with prefixes and formatting.
+ * Provides consistent logging across the application with support for
+ * different log levels and structured logging.
+ *
+ * In production, this could be extended to send logs to a service like
+ * Vercel Logs, LogDNA, or another logging service.
  */
 
-// Log levels
 type LogLevel = "debug" | "info" | "warn" | "error"
 
-// Log a message with context
-export function log(level: LogLevel, message: string, context?: Record<string, any>): void {
-  const timestamp = new Date().toISOString()
-  const formattedMessage = `[${timestamp}] [${level.toUpperCase()}] ${message}`
+interface LoggerOptions {
+  level?: LogLevel
+  prefix?: string
+}
 
-  switch (level) {
-    case "debug":
-      console.debug(formattedMessage, context || "")
-      break
-    case "info":
-      console.log(formattedMessage, context || "")
-      break
-    case "warn":
-      console.warn(formattedMessage, context || "")
-      break
-    case "error":
-      console.error(formattedMessage, context || "")
-      break
+class Logger {
+  private level: LogLevel
+  private prefix: string
+
+  constructor(options: LoggerOptions = {}) {
+    this.level = options.level || "info"
+    this.prefix = options.prefix || "LLMGraph"
+  }
+
+  private shouldLog(level: LogLevel): boolean {
+    const levels: Record<LogLevel, number> = {
+      debug: 0,
+      info: 1,
+      warn: 2,
+      error: 3,
+    }
+
+    return levels[level] >= levels[this.level]
+  }
+
+  private formatMessage(level: LogLevel, message: string, data?: any): string {
+    const timestamp = new Date().toISOString()
+    const dataString = data ? ` ${JSON.stringify(data)}` : ""
+    return `[${timestamp}] [${this.prefix}] [${level.toUpperCase()}] ${message}${dataString}`
+  }
+
+  debug(message: string, data?: any): void {
+    if (this.shouldLog("debug")) {
+      console.debug(this.formatMessage("debug", message, data))
+    }
+  }
+
+  info(message: string, data?: any): void {
+    if (this.shouldLog("info")) {
+      console.info(this.formatMessage("info", message, data))
+    }
+  }
+
+  warn(message: string, data?: any): void {
+    if (this.shouldLog("warn")) {
+      console.warn(this.formatMessage("warn", message, data))
+    }
+  }
+
+  error(message: string, data?: any): void {
+    if (this.shouldLog("error")) {
+      console.error(this.formatMessage("error", message, data))
+    }
   }
 }
 
-// Shorthand functions
-export const debug = (message: string, context?: Record<string, any>) => log("debug", message, context)
-export const info = (message: string, context?: Record<string, any>) => log("info", message, context)
-export const warn = (message: string, context?: Record<string, any>) => log("warn", message, context)
-export const error = (message: string, context?: Record<string, any>) => log("error", message, context)
-
-// Log the embedding configuration
-export function logEmbeddingConfig(model: string, dimensions: number, indexName: string, host: string): void {
-  info("Embedding configuration initialized", {
-    model,
-    dimensions,
-    indexName,
-    host: host.split(".")[0], // Only log the first part for security
-  })
-}
-
-// Export a logger object with all logging functions
-export const logger = {
-  log,
-  debug,
-  info,
-  warn,
-  error,
-  logEmbeddingConfig,
-}
+// Export a singleton instance
+export const logger = new Logger({
+  level: process.env.NODE_ENV === "production" ? "info" : "debug",
+  prefix: "LLMGraph",
+})

@@ -1,40 +1,24 @@
 /**
  * Embedding Service
  *
- * Handles embedding generation using OpenAI's API.
- * This service is Edge-compatible and works with Vercel's serverless environment.
+ * Provides functions for generating embeddings using OpenAI's text-embedding-3-large model.
+ *
+ * IMPORTANT NOTES:
+ * ----------------
+ * 1. Always use text-embedding-3-large for this project (3072 dimensions)
+ * 2. Ensure OPENAI_API_KEY is set in your environment variables
+ * 3. This service is designed to be used in Edge runtime
  *
  * Dependencies:
- * - @/lib/embedding-config for model and dimension configuration
+ * - @/lib/embedding-config for model configuration
  * - @/lib/utils/logger for logging
  */
 
-import { EMBEDDING_MODEL, validateVectorDimension } from "./embedding-config"
+import { EMBEDDING_MODEL, VECTOR_DIMENSION } from "@/lib/embedding-config"
 import { logger } from "@/lib/utils/logger"
-
-// Cache for the OpenAI API key
-let openaiApiKey: string | null = null
-
-/**
- * Gets the OpenAI API key from environment variables
- * Uses caching for efficiency
- */
-function getOpenAIApiKey(): string {
-  if (!openaiApiKey) {
-    openaiApiKey = process.env.OPENAI_API_KEY
-    if (!openaiApiKey) {
-      throw new Error("OPENAI_API_KEY is not defined")
-    }
-  }
-  return openaiApiKey
-}
 
 /**
  * Generates an embedding for the given text using OpenAI's API
- * Validates the embedding before returning
- * 
- * @param text The text to generate an embedding for
- * @returns Array of floating point values representing the embedding
  */
 export async function generateEmbedding(text: string): Promise<number[]> {
   if (!text || text.trim() === "") {
@@ -42,11 +26,14 @@ export async function generateEmbedding(text: string): Promise<number[]> {
   }
 
   try {
-    const apiKey = getOpenAIApiKey()
+    const apiKey = process.env.OPENAI_API_KEY
+    if (!apiKey) {
+      throw new Error("OPENAI_API_KEY is not defined")
+    }
 
     logger.info("Generating embedding", {
-      textLength: text.length,
       model: EMBEDDING_MODEL,
+      textLength: text.length,
     })
 
     const response = await fetch("https://api.openai.com/v1/embeddings", {
@@ -62,29 +49,34 @@ export async function generateEmbedding(text: string): Promise<number[]> {
     })
 
     if (!response.ok) {
-      // Try to extract error details from the response
-      let errorMessage = "Unknown OpenAI API error";
-      try {
-        const errorData = await response.json();
-        errorMessage = errorData.error?.message || `Status ${response.status}: ${response.statusText}`;
-      } catch (parseError) {
-        errorMessage = `Status ${response.status}: ${response.statusText}`;
-      }
-      
-      logger.error("OpenAI API error:", {
+      const errorData = await response.json().catch(() => ({}))
+      logger.error("OpenAI API error", {
         status: response.status,
         statusText: response.statusText,
-        errorMessage
-      });
-      
-      throw new Error(`OpenAI API error: ${errorMessage}`);
+        error: errorData,
+      })
+      throw new Error(`OpenAI API error: ${response.status} ${response.statusText}`)
     }
 
-    const data = await response.json()
-    const embedding = data.data[0].embedding
+    const result = await response.json()
+    const embedding = result.data[0].embedding
 
-    // Validate the embedding has the correct dimensions and is not all zeros
-    validateVectorDimension(embedding)
+    // Validate embedding dimensions
+    if (!embedding || !Array.isArray(embedding)) {
+      throw new Error("Invalid embedding response from OpenAI API")
+    }
+
+    if (embedding.length !== VECTOR_DIMENSION) {
+      logger.error("Embedding dimension mismatch", {
+        expected: VECTOR_DIMENSION,
+        actual: embedding.length,
+        model: EMBEDDING_MODEL,
+      })
+      throw new Error(
+        `Embedding dimension mismatch: Expected ${VECTOR_DIMENSION}, got ${embedding.length}. ` +
+          `Make sure you're using the correct embedding model (${EMBEDDING_MODEL}).`,
+      )
+    }
 
     logger.info("Successfully generated embedding", {
       dimensions: embedding.length,
@@ -93,7 +85,35 @@ export async function generateEmbedding(text: string): Promise<number[]> {
 
     return embedding
   } catch (error) {
-    logger.error("Error generating embedding:", error)
+    logger.error("Error generating embedding", {
+      error: error instanceof Error ? error.message : "Unknown error",
+      stack: error instanceof Error ? error.stack : undefined,
+    })
     throw error
   }
+}
+
+/**
+ * Generates embeddings for multiple texts in batch
+ */
+export async function generateEmbeddings(texts: string[]): Promise<number[][]> {
+  if (!texts || texts.length === 0) {
+    return []
+  }
+
+  // Process in batches to avoid rate limits
+  const BATCH_SIZE = 20
+  const results: number[][] = []
+
+  for (let i = 0; i < texts.length; i += BATCH_SIZE) {
+    const batch = texts.slice(i, i + BATCH_SIZE)
+
+    // Process batch in parallel
+    const batchPromises = batch.map((text) => generateEmbedding(text))
+    const batchResults = await Promise.all(batchPromises)
+
+    results.push(...batchResults)
+  }
+
+  return results
 }

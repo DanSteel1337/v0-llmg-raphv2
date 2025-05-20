@@ -1,8 +1,20 @@
 /**
- * Pinecone REST Client
+ * Pinecone REST Client for Serverless
  *
- * Provides direct REST API access to Pinecone without requiring the SDK.
- * This ensures full compatibility with Edge runtime and Pinecone Serverless v0.5.2+.
+ * IMPORTANT SERVERLESS CONFIGURATION NOTES:
+ * -----------------------------------------
+ * 1. Pinecone Serverless indexes have unique host URLs that cannot be constructed
+ *    from just the index name and environment.
+ *
+ * 2. The host URL format for Serverless is:
+ *    {index-name}-{unique-id}.svc.{project-id}.pinecone.io
+ *    Example: unrealengine54-pkpzmzh.svc.aped-4627-b74a.pinecone.io
+ *
+ * 3. Always use the exact host URL from Pinecone console or API, never construct it.
+ *
+ * 4. Set PINECONE_HOST in your environment variables with the exact host URL.
+ *
+ * 5. Ensure vector dimensions match your Pinecone index dimensions (3072 for text-embedding-3-large).
  *
  * Dependencies:
  * - @/lib/embedding-config for vector dimension configuration
@@ -14,10 +26,11 @@ import { logger } from "@/lib/utils/logger"
 
 // Singleton instance
 let apiKey: string | null = null
-let indexName: string | null = null
+let pineconeHost: string | null = null
 
 /**
  * Gets the Pinecone client configuration
+ * Uses singleton pattern to avoid recreating the client on each request
  */
 export function getPineconeClient() {
   if (!apiKey) {
@@ -27,16 +40,27 @@ export function getPineconeClient() {
     }
   }
 
-  if (!indexName) {
-    indexName = process.env.PINECONE_INDEX_NAME
-    if (!indexName) {
-      throw new Error("PINECONE_INDEX_NAME is not defined")
+  if (!pineconeHost) {
+    // IMPORTANT: For Serverless, we must use the exact host URL from the Pinecone console
+    // Never construct the host URL from index name and environment
+    pineconeHost = process.env.PINECONE_HOST
+
+    if (!pineconeHost) {
+      throw new Error(
+        "PINECONE_HOST is not defined. For Serverless indexes, you must set the exact host URL from the Pinecone console.",
+      )
     }
+
+    // Ensure the host URL is properly formatted
+    if (!pineconeHost.startsWith("https://")) {
+      pineconeHost = `https://${pineconeHost}`
+    }
+
+    // Log the host URL for debugging
+    logger.info(`Initialized Pinecone client with host: ${pineconeHost}`)
   }
 
-  const host = `https://${indexName}.svc.${process.env.PINECONE_ENVIRONMENT || "gcp-starter"}.pinecone.io`
-
-  return { apiKey, indexName, host }
+  return { apiKey, host: pineconeHost }
 }
 
 /**
@@ -106,7 +130,7 @@ export function createPlaceholderVector(): number[] {
 /**
  * Upsert vectors to Pinecone
  */
-export async function upsertVectors(vectors: any[], namespace = ""): Promise<{upsertedCount: number}> {
+export async function upsertVectors(vectors: any[], namespace = ""): Promise<{ upsertedCount: number }> {
   logger.info(`Upserting ${vectors.length} vectors to Pinecone`, {
     namespace: namespace || "default",
     vectorCount: vectors.length,
@@ -172,6 +196,11 @@ export async function upsertVectors(vectors: any[], namespace = ""): Promise<{up
 
       if (!response.ok) {
         const errorText = await response.text()
+        logger.error(`Upsert failed: ${response.status} - ${errorText}`, {
+          host,
+          namespace,
+          batchSize: batch.length,
+        })
         throw new Error(`Upsert failed: ${response.status} ${response.statusText} - ${errorText}`)
       }
 
@@ -245,6 +274,7 @@ export async function queryVectors(
       logger.error(`Query error: Status ${response.status}`, {
         statusText: response.statusText,
         error: errorText,
+        host,
       })
 
       // Return empty matches instead of throwing to provide fallback behavior
@@ -294,6 +324,11 @@ export async function deleteVectors(ids: string[], namespace = "") {
 
     if (!response.ok) {
       const errorText = await response.text()
+      logger.error(`Delete failed: ${response.status} - ${errorText}`, {
+        host,
+        namespace,
+        idCount: safeIds.length,
+      })
       throw new Error(`Delete failed: ${response.status} ${response.statusText} - ${errorText}`)
     }
 
@@ -336,6 +371,7 @@ export async function healthCheck(): Promise<{ healthy: boolean; error?: string 
 
     if (!response.ok) {
       const errorText = await response.text()
+      logger.error(`Health check failed: ${response.status} - ${errorText}`, { host })
       return {
         healthy: false,
         error: `Health check failed: ${response.status} ${response.statusText} - ${errorText}`,
@@ -344,6 +380,7 @@ export async function healthCheck(): Promise<{ healthy: boolean; error?: string 
 
     return { healthy: true }
   } catch (error) {
+    logger.error("Health check exception:", error)
     return {
       healthy: false,
       error: `Health check exception: ${error instanceof Error ? error.message : String(error)}`,
