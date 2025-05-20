@@ -21,11 +21,8 @@ export function DocumentWidget({ userId }: DocumentWidgetProps) {
   const { documents, isLoading, error, uploadDocument, deleteDocument, retryProcessing, refreshDocuments } =
     useDocuments()
 
-  // Debug toast initialization
-  const toastResult = useToast()
-  console.log("Toast initialization result:", toastResult)
-  const { toast } = toastResult || {}
-  console.log("Toast function type:", typeof toast)
+  // Fix: Use addToast directly instead of trying to destructure a non-existent toast property
+  const { addToast } = useToast()
 
   const [isUploading, setIsUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
@@ -115,23 +112,6 @@ export function DocumentWidget({ userId }: DocumentWidgetProps) {
     return () => clearInterval(interval)
   }, [documents, refreshDocuments])
 
-  // Safe toast function that won't crash if toast is undefined
-  const safeToast = useCallback(
-    (props) => {
-      console.log("Attempting to call toast with:", props)
-      if (typeof toast === "function") {
-        try {
-          toast(props)
-        } catch (e) {
-          console.error("Error calling toast:", e)
-        }
-      } else {
-        console.error("Toast is not a function:", typeof toast)
-      }
-    },
-    [toast],
-  )
-
   const handleFileChange = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0]
@@ -139,31 +119,15 @@ export function DocumentWidget({ userId }: DocumentWidgetProps) {
 
       // Validate file type - only accept text files for now
       if (!file.type.includes("text/")) {
-        console.log("About to toast error for invalid file type")
-        try {
-          safeToast({
-            title: "Invalid file type",
-            description: "Only text files are supported at this time.",
-            variant: "destructive",
-          })
-        } catch (e) {
-          console.error("Toast error details:", e)
-        }
+        // Fix: Use addToast with the correct parameter format
+        addToast("Only text files are supported at this time.", "error")
         return
       }
 
       // Validate file size - max 10MB
       if (file.size > 10 * 1024 * 1024) {
-        console.log("About to toast error for file too large")
-        try {
-          safeToast({
-            title: "File too large",
-            description: "Maximum file size is 10MB.",
-            variant: "destructive",
-          })
-        } catch (e) {
-          console.error("Toast error details:", e)
-        }
+        // Fix: Use addToast with the correct parameter format
+        addToast("Maximum file size is 10MB.", "error")
         return
       }
 
@@ -182,27 +146,12 @@ export function DocumentWidget({ userId }: DocumentWidgetProps) {
         // Store the document ID for tracking
         setProcessingDocumentId(document.id)
 
-        console.log("About to toast success for document uploaded")
-        try {
-          safeToast({
-            title: "Document uploaded",
-            description: "Your document has been uploaded and is being processed.",
-          })
-        } catch (e) {
-          console.error("Toast success error details:", e)
-        }
+        // Fix: Use addToast with the correct parameter format
+        addToast("Your document has been uploaded and is being processed.", "success")
       } catch (error) {
         console.error("Error uploading document:", error)
-        console.log("About to toast error for upload failed")
-        try {
-          safeToast({
-            title: "Upload failed",
-            description: error instanceof Error ? error.message : "An unknown error occurred",
-            variant: "destructive",
-          })
-        } catch (e) {
-          console.error("Toast error details:", e)
-        }
+        // Fix: Use addToast with the correct parameter format
+        addToast(error instanceof Error ? error.message : "An unknown error occurred", "error")
         setIsUploading(false)
       } finally {
         if (fileInputRef.current) {
@@ -210,63 +159,37 @@ export function DocumentWidget({ userId }: DocumentWidgetProps) {
         }
       }
     },
-    [uploadDocument, safeToast],
+    [uploadDocument, addToast],
   )
 
   const handleDeleteDocument = useCallback(
     async (documentId: string) => {
       try {
         await deleteDocument(documentId)
-        try {
-          safeToast({
-            title: "Document deleted",
-            description: "The document has been removed from your library.",
-          })
-        } catch (e) {
-          console.error("Toast error details:", e)
-        }
+        // Fix: Use addToast with the correct parameter format
+        addToast("The document has been removed from your library.", "success")
       } catch (error) {
         console.error("Error deleting document:", error)
-        try {
-          safeToast({
-            title: "Delete failed",
-            description: error instanceof Error ? error.message : "An unknown error occurred",
-            variant: "destructive",
-          })
-        } catch (e) {
-          console.error("Toast error details:", e)
-        }
+        // Fix: Use addToast with the correct parameter format
+        addToast(error instanceof Error ? error.message : "An unknown error occurred", "error")
       }
     },
-    [deleteDocument, safeToast],
+    [deleteDocument, addToast],
   )
 
   const handleRetryProcessing = useCallback(
     async (documentId: string) => {
       try {
         await retryProcessing(documentId)
-        try {
-          safeToast({
-            title: "Processing restarted",
-            description: "Document processing has been restarted.",
-          })
-        } catch (e) {
-          console.error("Toast error details:", e)
-        }
+        // Fix: Use addToast with the correct parameter format
+        addToast("Document processing has been restarted.", "success")
       } catch (error) {
         console.error("Error retrying document processing:", error)
-        try {
-          safeToast({
-            title: "Retry failed",
-            description: error instanceof Error ? error.message : "An unknown error occurred",
-            variant: "destructive",
-          })
-        } catch (e) {
-          console.error("Toast error details:", e)
-        }
+        // Fix: Use addToast with the correct parameter format
+        addToast(error instanceof Error ? error.message : "An unknown error occurred", "error")
       }
     },
-    [retryProcessing, safeToast],
+    [retryProcessing, addToast],
   )
 
   const handleViewDocument = useCallback((document: Document) => {
