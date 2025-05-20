@@ -4,7 +4,7 @@ import type { NextRequest } from "next/server"
 import { NextResponse } from "next/server"
 import { withErrorHandling } from "@/utils/errorHandling"
 import { logger } from "@/lib/utils/logger"
-import { get } from "@vercel/blob"
+import { getBlob } from "@vercel/blob"
 
 export const runtime = "edge"
 
@@ -33,7 +33,7 @@ export const GET = withErrorHandling(async (request: NextRequest) => {
       if (path.startsWith("documents/")) {
         try {
           // Try to get the blob directly
-          const blob = await get(path)
+          const blob = await getBlob(path)
 
           if (blob) {
             logger.info(`GET /api/documents/file - Redirecting to blob URL for path`, {
@@ -47,7 +47,7 @@ export const GET = withErrorHandling(async (request: NextRequest) => {
             path,
             error: blobError instanceof Error ? blobError.message : "Unknown error",
           })
-          
+
           // If we can't get a blob URL, try to fetch the content directly
           try {
             // Try to fetch the file directly - this will work for paths that are actually URLs
@@ -55,7 +55,7 @@ export const GET = withErrorHandling(async (request: NextRequest) => {
             if (response.ok) {
               const contentType = response.headers.get("Content-Type") || "text/plain"
               const content = await response.text()
-              
+
               return new NextResponse(content, {
                 headers: {
                   "Content-Type": contentType,
@@ -78,7 +78,7 @@ export const GET = withErrorHandling(async (request: NextRequest) => {
           if (response.ok) {
             const contentType = response.headers.get("Content-Type") || "text/plain"
             const content = await response.text()
-            
+
             return new NextResponse(content, {
               headers: {
                 "Content-Type": contentType,
@@ -95,14 +95,14 @@ export const GET = withErrorHandling(async (request: NextRequest) => {
 
       // If we get here, we couldn't retrieve the file - return a fallback message
       logger.info(`GET /api/documents/file - Returning fallback content`, { path })
-      
+
       return new NextResponse(`# Could not retrieve file: ${path}\n\nThe file could not be found or accessed.`, {
         headers: {
           "Content-Type": "text/plain",
         },
       })
     }
-    
+
     // Should never reach here due to the initial check, but just in case
     return NextResponse.json({ error: "Invalid request parameters" }, { status: 400 })
   } catch (error) {
