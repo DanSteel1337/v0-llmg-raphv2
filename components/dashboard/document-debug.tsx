@@ -40,24 +40,38 @@ export function DocumentDebug({ document, onRetry }: DocumentDebugProps) {
     )
   }
 
+  // Handle retry with proper error handling
   const handleRetry = async () => {
-    if (!onRetry) {
-      addToast("Retry function not available", "error")
-      return
+    // First verify onRetry is a function
+    if (!onRetry || typeof onRetry !== 'function') {
+      console.error("Retry function not available or not a function:", onRetry);
+      addToast("Retry function not available", "error");
+      return;
     }
 
     try {
-      setIsRetrying(true)
-      await onRetry(document.id)
-      addToast("Document processing retry initiated", "success")
+      setIsRetrying(true);
+      console.log(`Attempting to retry document processing for ID: ${document.id}`);
+      
+      // Call the retry function and wait for it to complete
+      await onRetry(document.id);
+      
+      // Success message
+      addToast("Document processing retry initiated", "success");
     } catch (error) {
-      console.error("Retry error:", error)
+      console.error("Retry error:", error);
+      
+      // Detailed error logging
+      if (error instanceof Error) {
+        console.error(`Error details: ${error.message}`, error.stack);
+      }
+      
       addToast(
         "Failed to retry document processing: " + (error instanceof Error ? error.message : "Unknown error"),
-        "error",
-      )
+        "error"
+      );
     } finally {
-      setIsRetrying(false)
+      setIsRetrying(false);
     }
   }
 

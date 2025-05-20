@@ -16,7 +16,7 @@
 import type React from "react"
 import type { Document } from "@/types"
 
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useCallback } from "react"
 import { FileText, Upload, AlertCircle, CheckCircle, HelpCircle, Trash, Bug } from "lucide-react"
 import { DashboardCard } from "@/components/ui/dashboard-card"
 import { useDocuments } from "@/hooks/use-documents"
@@ -102,6 +102,27 @@ export function DocumentWidget({ userId, limit = 5 }: DocumentWidgetProps) {
       Object.values(processingTimeouts).forEach((timeout) => clearTimeout(timeout))
     }
   }, [processingTimeouts])
+
+  // Wrap retry handling in useCallback
+  const handleRetryProcessing = useCallback(async (documentId: string) => {
+    try {
+      console.log(`DocumentWidget: Initiating retry for document ${documentId}`);
+      
+      if (!retryDocumentProcessing || typeof retryDocumentProcessing !== 'function') {
+        console.error("retryDocumentProcessing is not a function:", retryDocumentProcessing);
+        addToast("Retry functionality not available", "error");
+        return;
+      }
+      
+      await retryDocumentProcessing(documentId);
+      addToast("Document processing retry initiated", "success");
+      await refreshDocuments();
+    } catch (error) {
+      console.error("Retry error:", error);
+      const message = error instanceof Error ? error.message : "Unknown error occurred";
+      addToast("Failed to retry document processing: " + message, "error");
+    }
+  }, [retryDocumentProcessing, refreshDocuments, addToast]);
 
   // Retry loading documents if there was an error
   const handleRetry = () => {
@@ -215,23 +236,6 @@ export function DocumentWidget({ userId, limit = 5 }: DocumentWidgetProps) {
     setShowDebugPanel(true)
   }
 
-  const handleRetryProcessing = async (documentId: string) => {
-    if (!retryDocumentProcessing) {
-      addToast("Retry functionality not available", "error")
-      return
-    }
-
-    try {
-      await retryDocumentProcessing(documentId)
-      addToast("Document processing retry initiated", "success")
-      refreshDocuments()
-    } catch (error) {
-      console.error("Retry error:", error)
-      const message = error instanceof Error ? error.message : "Unknown error occurred"
-      addToast("Failed to retry document processing: " + message, "error")
-    }
-  }
-
   return (
     <DashboardCard title="Documents" description="Recently uploaded documents" isLoading={isLoading && !isUploading}>
       <div className="space-y-4">
@@ -326,7 +330,7 @@ export function DocumentWidget({ userId, limit = 5 }: DocumentWidgetProps) {
             <h3 className="text-sm font-medium text-gray-700 mb-2">Document Debug Information</h3>
             <DocumentDebug
               document={selectedDocument}
-              onRetry={retryDocumentProcessing ? handleRetryProcessing : undefined}
+              onRetry={handleRetryProcessing}
             />
           </div>
         )}

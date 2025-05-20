@@ -1,5 +1,3 @@
-"use client"
-
 /**
  * Documents Hook
  *
@@ -7,22 +5,19 @@
  * Provides functionality for listing, uploading, deleting, and retrying document processing.
  */
 
+"use client"
+
 import { useState, useEffect, useCallback } from "react"
-import { useAuth } from "./use-auth"
-import { useApi } from "./use-api"
 import type { Document } from "@/types"
 
+// Direct fetch-based API implementation to avoid potential issues with utility functions
 export function useDocuments(userId?: string) {
   const [documents, setDocuments] = useState<Document[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<Error | null>(null)
-  const { session } = useAuth()
-  const { apiCall } = useApi()
-
-  const effectiveUserId = userId || session?.user?.id
 
   const fetchDocuments = useCallback(async () => {
-    if (!effectiveUserId) {
+    if (!userId) {
       setDocuments([])
       setIsLoading(false)
       return
@@ -32,22 +27,28 @@ export function useDocuments(userId?: string) {
       setIsLoading(true)
       setError(null)
 
-      const response = await apiCall(`/api/documents?userId=${effectiveUserId}`, {
-        method: "GET",
-      })
-
-      if (!response.success) {
-        throw new Error(response.error || "Failed to fetch documents")
+      // Direct fetch call instead of using apiCall
+      const response = await fetch(`/api/documents?userId=${encodeURIComponent(userId)}`)
+      
+      if (!response.ok) {
+        throw new Error(`Failed to fetch documents: ${response.status} ${response.statusText}`)
       }
-
-      setDocuments(response.data || [])
+      
+      const data = await response.json()
+      
+      if (!data || !data.documents) {
+        console.warn("Received invalid response from documents API", { data })
+        setDocuments([])
+      } else {
+        setDocuments(Array.isArray(data.documents) ? data.documents : [])
+      }
     } catch (err) {
       console.error("Error fetching documents:", err)
       setError(err instanceof Error ? err : new Error(String(err)))
     } finally {
       setIsLoading(false)
     }
-  }, [effectiveUserId, apiCall])
+  }, [userId])
 
   useEffect(() => {
     fetchDocuments()
@@ -55,7 +56,7 @@ export function useDocuments(userId?: string) {
 
   const uploadDocument = useCallback(
     async (file: File, onProgress?: (progress: number) => void): Promise<Document> => {
-      if (!effectiveUserId) {
+      if (!userId) {
         throw new Error("User ID is required")
       }
 
@@ -63,9 +64,8 @@ export function useDocuments(userId?: string) {
         // Create a FormData object to send the file
         const formData = new FormData()
         formData.append("file", file)
-        formData.append("userId", effectiveUserId)
+        formData.append("userId", userId)
 
-        // Use fetch directly for FormData and to track upload progress
         const response = await fetch("/api/documents/upload", {
           method: "POST",
           body: formData,
@@ -82,28 +82,31 @@ export function useDocuments(userId?: string) {
           throw new Error(result.error || "Upload failed")
         }
 
-        return result.data
+        await fetchDocuments()
+
+        return result.document
       } catch (err) {
         console.error("Error uploading document:", err)
         throw err instanceof Error ? err : new Error(String(err))
       }
     },
-    [effectiveUserId],
+    [userId, fetchDocuments]
   )
 
   const deleteDocument = useCallback(
     async (documentId: string): Promise<void> => {
-      if (!effectiveUserId) {
-        throw new Error("User ID is required")
+      if (!documentId) {
+        throw new Error("Document ID is required")
       }
 
       try {
-        const response = await apiCall(`/api/documents/${documentId}`, {
+        // Direct fetch call
+        const response = await fetch(`/api/documents/${documentId}`, {
           method: "DELETE",
         })
 
-        if (!response.success) {
-          throw new Error(response.error || "Failed to delete document")
+        if (!response.ok) {
+          throw new Error(`Failed to delete document: ${response.status} ${response.statusText}`)
         }
 
         // Update local state to remove the deleted document
@@ -113,23 +116,37 @@ export function useDocuments(userId?: string) {
         throw err instanceof Error ? err : new Error(String(err))
       }
     },
-    [effectiveUserId, apiCall],
+    []
   )
 
+  // Properly implement retryDocumentProcessing function using direct fetch
   const retryDocumentProcessing = useCallback(
     async (documentId: string): Promise<void> => {
-      if (!effectiveUserId) {
-        throw new Error("User ID is required")
+      if (!documentId) {
+        throw new Error("Document ID is required")
       }
 
+      console.log("Retrying document processing:", documentId)
+
       try {
-        const response = await apiCall(`/api/documents/retry`, {
+        // Direct fetch implementation
+        const response = await fetch("/api/documents/retry", {
           method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
           body: JSON.stringify({ documentId }),
         })
 
-        if (!response.success) {
-          throw new Error(response.error || "Failed to retry document processing")
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}))
+          throw new Error(errorData.error || `Retry failed with status: ${response.status}`)
+        }
+
+        const result = await response.json()
+
+        if (!result.success) {
+          throw new Error(result.error || "Failed to retry document processing")
         }
 
         // Update local state to reflect the document is now processing
@@ -143,15 +160,19 @@ export function useDocuments(userId?: string) {
                   error_message: undefined,
                   updated_at: new Date().toISOString(),
                 }
-              : doc,
-          ),
+              : doc
+          )
         )
+        
+        // Refresh documents to get updated status
+        // Use a slight delay to ensure the backend has processed the request
+        setTimeout(() => fetchDocuments(), 1000)
       } catch (err) {
         console.error("Error retrying document processing:", err)
         throw err instanceof Error ? err : new Error(String(err))
       }
     },
-    [effectiveUserId, apiCall],
+    [fetchDocuments]
   )
 
   return {
