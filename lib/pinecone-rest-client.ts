@@ -96,7 +96,7 @@ async function fetchWithRetry(url: string, options: RequestInit, retries = 3, ba
  * Creates a placeholder vector with small non-zero values
  * This prevents Pinecone from rejecting the vector for being all zeros
  */
-export function createPlaceholderVector() {
+export function createPlaceholderVector(): number[] {
   // Create a vector with small random values instead of zeros
   return Array(VECTOR_DIMENSION)
     .fill(0)
@@ -106,7 +106,7 @@ export function createPlaceholderVector() {
 /**
  * Upsert vectors to Pinecone
  */
-export async function upsertVectors(vectors: any[], namespace = "") {
+export async function upsertVectors(vectors: any[], namespace = ""): Promise<{upsertedCount: number}> {
   logger.info(`Upserting ${vectors.length} vectors to Pinecone`, {
     namespace: namespace || "default",
     vectorCount: vectors.length,

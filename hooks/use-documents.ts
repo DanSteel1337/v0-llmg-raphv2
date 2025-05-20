@@ -1,72 +1,107 @@
 /**
- * Documents Hook
+ * Use Documents Hook
  *
  * Custom hook for managing document operations including fetching,
  * uploading, and deleting documents.
  *
  * Dependencies:
  * - @/hooks/use-api for API interaction
- * - @/types for document types
+ * - @/services/client-api-service for document operations
  */
 
 "use client"
 
-import { useEffect, useCallback } from "react"
-import { useApi } from "@/hooks/use-api"
-import { fetchDocuments, uploadDocument, deleteDocument } from "@/services/client-api-service"
+import { useEffect, useCallback, useState } from "react"
+import { fetchDocuments, uploadDocument as apiUploadDocument, deleteDocument as apiDeleteDocument } from "@/services/client-api-service"
 import type { Document } from "@/types"
 
+/**
+ * Hook for document management operations
+ * 
+ * @param userId The user ID for documents context
+ * @returns Document operations and state
+ */
 export function useDocuments(userId: string) {
-  // Wrap the fetchDocuments call with useCallback to create a stable reference
-  const fetchDocumentsCallback = useCallback(() => {
-    return fetchDocuments(userId)
+  const [documents, setDocuments] = useState<Document[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<Error | null>(null)
+
+  /**
+   * Fetch documents from the API and update state
+   */
+  const fetchDocumentsData = useCallback(async () => {
+    if (!userId) {
+      setIsLoading(false)
+      return
+    }
+
+    setIsLoading(true)
+    setError(null)
+
+    try {
+      const docs = await fetchDocuments(userId)
+      setDocuments(docs)
+    } catch (err) {
+      console.error("Error fetching documents:", err)
+      setError(err instanceof Error ? err : new Error(String(err)))
+    } finally {
+      setIsLoading(false)
+    }
   }, [userId])
 
-  const {
-    data: documents,
-    isLoading,
-    error,
-    execute: fetchDocumentsData,
-  } = useApi<Document[], []>(fetchDocumentsCallback)
-
+  // Load documents on mount
   useEffect(() => {
     fetchDocumentsData()
   }, [fetchDocumentsData])
 
-  const handleUploadDocument = async (file: File) => {
+  /**
+   * Upload a document and optionally monitor progress
+   * 
+   * @param file The file to upload
+   * @param onProgress Optional progress callback
+   * @returns Document metadata from the server
+   */
+  const handleUploadDocument = async (file: File, onProgress?: (progress: number) => void) => {
     try {
-      const document = await uploadDocument(userId, file)
+      setError(null)
+      
+      // Call the API service to upload the document
+      const document = await apiUploadDocument(userId, file, onProgress)
 
-      // Add validation here
-      console.log("Upload document response:", document)
-      if (!document?.id) {
-        throw new Error("Document upload failed: Missing document ID in response")
-      }
-
-      // Refresh documents list
-      await fetchDocumentsData()
+      // Refresh the documents list to include the newly uploaded document
+      fetchDocumentsData()
 
       return document
-    } catch (error) {
-      console.error("Error uploading document:", error)
-      throw error
+    } catch (err) {
+      console.error("Error uploading document:", err)
+      setError(err instanceof Error ? err : new Error(String(err)))
+      throw err
     }
   }
 
+  /**
+   * Delete a document by ID
+   * 
+   * @param id Document ID to delete
+   */
   const handleDeleteDocument = async (id: string) => {
     try {
-      await deleteDocument(id)
+      setError(null)
+      
+      // Call the API service to delete the document
+      await apiDeleteDocument(id)
 
-      // Refresh documents list
-      await fetchDocumentsData()
-    } catch (error) {
-      console.error("Error deleting document:", error)
-      throw error
+      // Update the local state to remove the deleted document
+      setDocuments((prevDocs) => prevDocs.filter((doc) => doc.id !== id))
+    } catch (err) {
+      console.error("Error deleting document:", err)
+      setError(err instanceof Error ? err : new Error(String(err)))
+      throw err
     }
   }
 
   return {
-    documents: documents || [],
+    documents,
     isLoading,
     error,
     uploadDocument: handleUploadDocument,

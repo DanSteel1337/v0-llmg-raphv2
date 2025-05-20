@@ -17,6 +17,7 @@ let openaiApiKey: string | null = null
 
 /**
  * Gets the OpenAI API key from environment variables
+ * Uses caching for efficiency
  */
 function getOpenAIApiKey(): string {
   if (!openaiApiKey) {
@@ -29,7 +30,11 @@ function getOpenAIApiKey(): string {
 }
 
 /**
- * Generates an embedding for the given text
+ * Generates an embedding for the given text using OpenAI's API
+ * Validates the embedding before returning
+ * 
+ * @param text The text to generate an embedding for
+ * @returns Array of floating point values representing the embedding
  */
 export async function generateEmbedding(text: string): Promise<number[]> {
   if (!text || text.trim() === "") {
@@ -57,14 +62,28 @@ export async function generateEmbedding(text: string): Promise<number[]> {
     })
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: { message: "Unknown error" } }))
-      throw new Error(`OpenAI API error: ${error.error?.message || response.statusText}`)
+      // Try to extract error details from the response
+      let errorMessage = "Unknown OpenAI API error";
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.error?.message || `Status ${response.status}: ${response.statusText}`;
+      } catch (parseError) {
+        errorMessage = `Status ${response.status}: ${response.statusText}`;
+      }
+      
+      logger.error("OpenAI API error:", {
+        status: response.status,
+        statusText: response.statusText,
+        errorMessage
+      });
+      
+      throw new Error(`OpenAI API error: ${errorMessage}`);
     }
 
     const data = await response.json()
     const embedding = data.data[0].embedding
 
-    // Validate the embedding
+    // Validate the embedding has the correct dimensions and is not all zeros
     validateVectorDimension(embedding)
 
     logger.info("Successfully generated embedding", {

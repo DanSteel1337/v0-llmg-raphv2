@@ -58,6 +58,7 @@ export const POST = withErrorHandling(async (request: NextRequest) => {
       validateRequiredFields(body, ["userId", "name", "fileType", "fileSize", "filePath"], "Document creation")
       const { userId, name, description, fileType, fileSize, filePath } = body
 
+      // Call the document service to create the document
       const document = await createDocument({
         userId,
         name,

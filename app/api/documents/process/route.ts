@@ -10,6 +10,7 @@
  * - @/utils/apiRequest for standardized API responses
  * - @/utils/validation for input validation
  * - @/lib/utils/logger for logging
+ * - @/services/document-service for document processing
  */
 
 import type { NextRequest } from "next/server"
@@ -17,6 +18,7 @@ import { handleApiRequest } from "@/utils/apiRequest"
 import { withErrorHandling } from "@/utils/errorHandling"
 import { validateRequiredFields } from "@/utils/validation"
 import { logger } from "@/lib/utils/logger"
+import { processDocument } from "@/services/document-service"
 import { NextResponse } from "next/server"
 
 export const runtime = "edge"
@@ -62,8 +64,22 @@ export const POST = withErrorHandling(async (request: NextRequest) => {
           )
         }
 
-        // File exists, proceed with processing
-        // In a real implementation, you would process the document here
+        // File exists, process it asynchronously
+        // This is important because document processing can take time
+        // and we don't want to block the response
+        processDocument({
+          documentId,
+          userId,
+          filePath,
+          fileName,
+          fileType,
+          fileUrl,
+        }).catch(processingError => {
+          logger.error(`Error in background document processing`, {
+            documentId,
+            error: processingError instanceof Error ? processingError.message : "Unknown error",
+          })
+        })
 
         logger.info(`POST /api/documents/process - Document processing started`, {
           documentId,

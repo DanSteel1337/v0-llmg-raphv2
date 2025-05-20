@@ -1,11 +1,20 @@
 /**
- * Dashboard widget for document upload and listing.
- * Handles optimistic UI update and monitors document processing progress.
+ * Document Widget Component
+ *
+ * A dashboard widget for document upload and listing.
+ * Handles optimistic UI updates and monitors document processing progress.
+ * 
+ * Dependencies:
+ * - @/components/ui/dashboard-card for layout
+ * - @/hooks/use-documents for document operations
+ * - @/utils/formatting for display formatting
+ * - @/components/toast for notifications
  */
 
 "use client"
 
 import type React from "react"
+import type { Document } from "@/types"
 
 import { useState, useRef, useEffect } from "react"
 import { FileText, Upload, AlertCircle, CheckCircle } from "lucide-react"
@@ -13,7 +22,6 @@ import { DashboardCard } from "@/components/ui/dashboard-card"
 import { useDocuments } from "@/hooks/use-documents"
 import { formatFileSize, formatDate } from "@/utils/formatting"
 import { useToast } from "@/components/toast"
-import type { Document } from "@/types"
 
 interface DocumentWidgetProps {
   userId: string

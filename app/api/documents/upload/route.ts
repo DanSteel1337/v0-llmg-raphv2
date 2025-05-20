@@ -8,7 +8,7 @@
  * - @/utils/errorHandling for consistent error handling
  * - @/utils/apiRequest for standardized API responses
  * - @/utils/validation for input validation
- * - @/services/document-service for file storage
+ * - @/lib/utils/logger for logging
  */
 
 import type { NextRequest } from "next/server"
@@ -64,6 +64,7 @@ export const POST = withErrorHandling(async (request: NextRequest) => {
         fileSize: file.size,
       })
 
+      // Return the file URL for processing
       return {
         success: true,
         documentId,

@@ -1,19 +1,27 @@
 /**
- * Core document logic: metadata creation, chunking, embedding, and Pinecone upsert.
- * Server-only: used in Edge API routes only.
+ * Document Service
+ *
+ * Handles document operations including creation, retrieval, and processing.
+ * Core service for managing document lifecycle in the application.
+ * 
+ * Dependencies:
+ * - @/lib/pinecone-rest-client for vector database operations
+ * - @/lib/embedding-service for embedding generation
+ * - @/lib/chunking-utils for document text processing
  */
 
-import { upsertVectors, queryVectors, deleteVectors } from "@/lib/pinecone-rest-client"
+import { upsertVectors, queryVectors, deleteVectors, createPlaceholderVector } from "@/lib/pinecone-rest-client"
 import { generateEmbedding } from "@/lib/embedding-service"
 import { chunkDocument } from "@/lib/chunking-utils"
-import { VECTOR_DIMENSION, EMBEDDING_MODEL } from "@/lib/embedding-config"
+import { EMBEDDING_MODEL } from "@/lib/embedding-config"
 import type { Document, ProcessDocumentOptions } from "@/types"
 
 // Constants
 const MAX_CHUNK_SIZE = 1000
 
 /**
- * Creates a new document
+ * Creates a new document in the system
+ * Uses proper placeholder vectors for metadata storage in Pinecone
  */
 export async function createDocument(
   userId: string,
@@ -43,32 +51,39 @@ export async function createDocument(
     updated_at: now,
   }
 
-  // Create a zero vector with the correct dimension
-  const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+  console.log(`Creating document record`, { userId, name, documentId })
+
+  // Create a placeholder vector with small non-zero values
+  const placeholderVector = createPlaceholderVector()
 
   await upsertVectors([
     {
       id: `meta_${documentId}`,
-      values: zeroVector, // Zero vector with correct dimension
+      values: placeholderVector, // Non-zero placeholder vector
       metadata: {
         ...document,
-        record_type: "document",
+        record_type: "document", // Consistent record_type field
       },
     },
   ])
+
+  console.log(`Document record created successfully`, { documentId, userId })
 
   return document
 }
 
 /**
  * Gets all documents for a user
+ * Retrieves document metadata from Pinecone
  */
 export async function getDocumentsByUserId(userId: string): Promise<Document[]> {
-  // Create a zero vector with the correct dimension
-  const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+  console.log(`Getting documents for user`, { userId })
+
+  // Create a placeholder vector with non-zero values
+  const placeholderVector = createPlaceholderVector()
 
   const response = await queryVectors(
-    zeroVector, // Zero vector with correct dimension
+    placeholderVector, // Using correct non-zero vector
     100,
     true,
     {
@@ -83,7 +98,10 @@ export async function getDocumentsByUserId(userId: string): Promise<Document[]> 
     return [] // Return empty array as fallback
   }
 
-  return (response.matches || []).map((match) => ({
+  // Ensure matches is an array before mapping
+  const matches = Array.isArray(response.matches) ? response.matches : []
+
+  const documents = matches.map((match) => ({
     id: match.id,
     user_id: match.metadata?.user_id as string,
     name: match.metadata?.name as string,
@@ -97,6 +115,9 @@ export async function getDocumentsByUserId(userId: string): Promise<Document[]> 
     created_at: match.metadata?.created_at as string,
     updated_at: match.metadata?.updated_at as string,
   }))
+
+  console.log(`Found ${documents.length} documents for user`, { userId })
+  return documents
 }
 
 /**
@@ -104,12 +125,12 @@ export async function getDocumentsByUserId(userId: string): Promise<Document[]> 
  */
 export async function getDocumentCountByUserId(userId: string): Promise<number> {
   try {
-    // Create a zero vector with the correct dimension
-    const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+    // Create a placeholder vector with small non-zero values
+    const placeholderVector = createPlaceholderVector()
 
     // Query Pinecone for documents with the specified user_id
     const response = await queryVectors(
-      zeroVector,
+      placeholderVector,
       10000, // Use a high limit, but be aware of potential truncation
       true,
       {
@@ -135,11 +156,11 @@ export async function getDocumentCountByUserId(userId: string): Promise<number> 
  * Gets a document by ID
  */
 export async function getDocumentById(id: string): Promise<Document | null> {
-  // Create a zero vector with the correct dimension
-  const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+  // Create a placeholder vector with small non-zero values
+  const placeholderVector = createPlaceholderVector()
 
   const response = await queryVectors(
-    zeroVector, // Zero vector with correct dimension
+    placeholderVector, // Non-zero placeholder vector
     1,
     true,
     {
@@ -200,16 +221,16 @@ export async function updateDocumentStatus(
     updated_at: new Date().toISOString(),
   }
 
-  // Create a zero vector with the correct dimension
-  const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+  // Create a non-zero placeholder vector
+  const placeholderVector = createPlaceholderVector()
 
   await upsertVectors([
     {
       id: documentId,
-      values: zeroVector, // Zero vector with correct dimension
+      values: placeholderVector, // Non-zero placeholder vector
       metadata: {
         ...updatedDocument,
-        record_type: "document",
+        record_type: "document", // Consistent record_type
       },
     },
   ])
@@ -224,12 +245,12 @@ export async function deleteDocument(id: string): Promise<void> {
   // Delete the document
   await deleteVectors([id])
 
-  // Create a zero vector with the correct dimension
-  const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+  // Create a placeholder vector with small non-zero values
+  const placeholderVector = createPlaceholderVector()
 
   // Find all chunks for this document
   const response = await queryVectors(
-    zeroVector, // Zero vector with correct dimension
+    placeholderVector,
     1000,
     true,
     {
@@ -243,55 +264,6 @@ export async function deleteDocument(id: string): Promise<void> {
     const chunkIds = response.matches.map((match) => match.id)
     await deleteVectors(chunkIds)
   }
-}
-
-/**
- * Uploads a file to storage (using Supabase for file storage only)
- */
-export async function uploadFile(userId: string, file: File): Promise<{ path: string }> {
-  // In a real implementation, you would upload the file to a storage service
-  // For this example, we'll simulate a successful upload
-  const fileName = `${Date.now()}-${file.name}`
-  const filePath = `${userId}/${fileName}`
-
-  return { path: filePath }
-}
-
-/**
- * Gets a signed URL for a file
- */
-export async function getFileSignedUrl(filePath: string): Promise<string> {
-  // In a real implementation, you would generate a signed URL from your storage service
-  // For this example, we'll return a placeholder URL
-  return `https://example.com/files/${filePath}`
-}
-
-/**
- * Validates if a chunk is informative enough to be embedded
- */
-function isInformativeChunk(text: string): boolean {
-  if (!text || text.trim() === "") {
-    return false
-  }
-
-  // Skip chunks that are too short
-  if (text.trim().length < 10) {
-    return false
-  }
-
-  // Skip chunks that don't have enough unique words
-  const uniqueWords = new Set(
-    text
-      .toLowerCase()
-      .split(/\s+/)
-      .filter((word) => word.length > 1),
-  )
-
-  if (uniqueWords.size < 3) {
-    return false
-  }
-
-  return true
 }
 
 /**
@@ -546,4 +518,32 @@ export async function processDocument({
       error: errorMessage,
     }
   }
+}
+
+/**
+ * Validates if a chunk is informative enough to be embedded
+ */
+function isInformativeChunk(text: string): boolean {
+  if (!text || text.trim() === "") {
+    return false
+  }
+
+  // Skip chunks that are too short
+  if (text.trim().length < 10) {
+    return false
+  }
+
+  // Skip chunks that don't have enough unique words
+  const uniqueWords = new Set(
+    text
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((word) => word.length > 1),
+  )
+
+  if (uniqueWords.size < 3) {
+    return false
+  }
+
+  return true
 }
