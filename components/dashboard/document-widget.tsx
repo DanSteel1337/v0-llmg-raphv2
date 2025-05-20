@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useCallback, useRef } from "react"
+import { useState, useCallback, useRef, useEffect } from "react"
 import { Trash2, Upload, RefreshCw, AlertCircle, FileText, CheckCircle, Clock } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
@@ -14,11 +14,40 @@ import { DashboardCard } from "@/components/ui/dashboard-card"
 import type { Document } from "@/types"
 
 export function DocumentWidget() {
-  const { documents, isLoading, error, uploadDocument, deleteDocument, retryProcessing } = useDocuments()
+  const { documents, isLoading, error, uploadDocument, deleteDocument, retryProcessing, handleRefreshDocuments } =
+    useDocuments()
   const { toast } = useToast()
   const [isUploading, setIsUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [stalledDocuments, setStalledDocuments] = useState<Set<string>>(new Set())
+
+  useEffect(() => {
+    // Check for documents stuck at 0% for more than 30 seconds
+    const stalledIds = new Set<string>()
+    const now = Date.now()
+
+    documents.forEach((doc) => {
+      if (
+        doc.status === "processing" &&
+        doc.processing_progress === 0 &&
+        new Date(doc.updated_at).getTime() < now - 30000
+      ) {
+        stalledIds.add(doc.id)
+      }
+    })
+
+    setStalledDocuments(stalledIds)
+
+    // Check every 10 seconds
+    const interval = setInterval(() => {
+      if (documents.some((doc) => doc.status === "processing")) {
+        handleRefreshDocuments()
+      }
+    }, 10000)
+
+    return () => clearInterval(interval)
+  }, [documents, handleRefreshDocuments])
 
   const handleFileChange = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -186,7 +215,23 @@ export function DocumentWidget() {
                         {doc.status === "processing" ? (
                           <div className="flex items-center text-amber-600">
                             <Clock className="mr-1 h-4 w-4" />
-                            <span className="text-xs">Processing {doc.processing_progress || 0}%</span>
+                            <span className="text-xs">
+                              Processing {doc.processing_progress || 0}%
+                              {stalledDocuments.has(doc.id) && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="ml-2 h-6 text-xs"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    handleRetryProcessing(doc.id)
+                                  }}
+                                >
+                                  <RefreshCw className="mr-1 h-3 w-3" />
+                                  Restart
+                                </Button>
+                              )}
+                            </span>
                           </div>
                         ) : doc.status === "indexed" ? (
                           <div className="flex items-center text-green-600">

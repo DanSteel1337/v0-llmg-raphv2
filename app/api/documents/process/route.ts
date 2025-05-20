@@ -1,31 +1,13 @@
-/**
- * Document Processing API Route
- *
- * Handles document processing requests, including text extraction, chunking, 
- * and embedding generation. Initiates asynchronous processing of document content.
- * 
- * Features:
- * - Document content extraction and processing
- * - Asynchronous processing with status updates
- * - Validation of required parameters
- * - Proper error handling and logging
- * 
- * Dependencies:
- * - @/utils/errorHandling for consistent error handling
- * - @/utils/apiRequest for standardized API responses
- * - @/lib/document-service for document operations
- * - @/lib/utils/logger for logging
- * 
- * @module app/api/documents/process/route
- */
+export const runtime = "edge"
+
+// Update maxDuration to be within the valid range (1-60 seconds)
+export const maxDuration = 60
 
 import type { NextRequest } from "next/server"
 import { handleApiRequest } from "@/utils/apiRequest"
 import { withErrorHandling } from "@/utils/errorHandling"
 import { processDocument } from "@/lib/document-service"
 import { logger } from "@/lib/utils/logger"
-
-export const runtime = "edge"
 
 /**
  * POST handler for document processing

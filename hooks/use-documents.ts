@@ -3,18 +3,18 @@
  *
  * React hook for managing documents in the Vector RAG application.
  * Provides functionality for fetching, uploading, deleting, and retrying document processing.
- * 
+ *
  * Features:
  * - Document listing with automatic updating
  * - Document upload with progress tracking
  * - Document deletion with error handling
  * - Processing retry for failed documents
- * 
+ *
  * Dependencies:
  * - @/services/client-api-service for API interactions
  * - @/hooks/use-auth for user session information
  * - @/types for document interfaces
- * 
+ *
  * @module hooks/use-documents
  */
 
@@ -59,6 +59,45 @@ export function useDocuments() {
 
     loadDocuments()
   }, [user?.id])
+
+  // Add a polling mechanism to check document status:
+  useEffect(() => {
+    // Only poll if we have documents that are processing
+    if (!documents.some((doc) => doc.status === "processing")) {
+      return
+    }
+
+    // Poll every 5 seconds for updates on processing documents
+    const interval = setInterval(async () => {
+      try {
+        if (user?.id) {
+          const updatedDocs = await fetchDocuments(user.id)
+          setDocuments((prevDocs) => {
+            // Merge the updated docs with existing ones, prioritizing updates for processing docs
+            const docMap = new Map(prevDocs.map((doc) => [doc.id, doc]))
+
+            for (const updatedDoc of updatedDocs) {
+              // Always update processing documents or if status has changed
+              if (
+                updatedDoc.status === "processing" ||
+                !docMap.has(updatedDoc.id) ||
+                docMap.get(updatedDoc.id)?.status !== updatedDoc.status
+              ) {
+                docMap.set(updatedDoc.id, updatedDoc)
+              }
+            }
+
+            return Array.from(docMap.values())
+          })
+        }
+      } catch (err) {
+        console.error("Error polling documents:", err)
+        // Don't update error state to avoid UI disruption during polling
+      }
+    }, 5000)
+
+    return () => clearInterval(interval)
+  }, [documents, user?.id])
 
   /**
    * Upload a document with progress tracking
