@@ -1,73 +1,101 @@
 /**
  * Logger Utility
  *
- * Provides consistent logging across the application with support for
- * different log levels and structured logging.
- *
- * In production, this could be extended to send logs to a service like
- * Vercel Logs, LogDNA, or another logging service.
+ * Provides structured logging with different log levels and context.
+ * Safe for use in Edge runtime.
  */
 
+// Log levels
 type LogLevel = "debug" | "info" | "warn" | "error"
 
-interface LoggerOptions {
-  level?: LogLevel
-  prefix?: string
+// Logger interface
+interface Logger {
+  debug(message: string, context?: Record<string, any>): void
+  info(message: string, context?: Record<string, any>): void
+  warn(message: string, context?: Record<string, any>): void
+  error(message: string, context?: Record<string, any>): void
 }
 
-class Logger {
-  private level: LogLevel
-  private prefix: string
+// Create a logger instance
+export const logger: Logger = {
+  debug(message: string, context?: Record<string, any>) {
+    logMessage("debug", message, context)
+  },
+  info(message: string, context?: Record<string, any>) {
+    logMessage("info", message, context)
+  },
+  warn(message: string, context?: Record<string, any>) {
+    logMessage("warn", message, context)
+  },
+  error(message: string, context?: Record<string, any>) {
+    logMessage("error", message, context)
+  },
+}
 
-  constructor(options: LoggerOptions = {}) {
-    this.level = options.level || "info"
-    this.prefix = options.prefix || "LLMGraph"
+/**
+ * Log a message with level and context
+ */
+function logMessage(level: LogLevel, message: string, context?: Record<string, any>) {
+  const timestamp = new Date().toISOString()
+  const logObject = {
+    timestamp,
+    level,
+    message,
+    ...sanitizeContext(context || {}),
   }
 
-  private shouldLog(level: LogLevel): boolean {
-    const levels: Record<LogLevel, number> = {
-      debug: 0,
-      info: 1,
-      warn: 2,
-      error: 3,
-    }
-
-    return levels[level] >= levels[this.level]
-  }
-
-  private formatMessage(level: LogLevel, message: string, data?: any): string {
-    const timestamp = new Date().toISOString()
-    const dataString = data ? ` ${JSON.stringify(data)}` : ""
-    return `[${timestamp}] [${this.prefix}] [${level.toUpperCase()}] ${message}${dataString}`
-  }
-
-  debug(message: string, data?: any): void {
-    if (this.shouldLog("debug")) {
-      console.debug(this.formatMessage("debug", message, data))
-    }
-  }
-
-  info(message: string, data?: any): void {
-    if (this.shouldLog("info")) {
-      console.info(this.formatMessage("info", message, data))
-    }
-  }
-
-  warn(message: string, data?: any): void {
-    if (this.shouldLog("warn")) {
-      console.warn(this.formatMessage("warn", message, data))
-    }
-  }
-
-  error(message: string, data?: any): void {
-    if (this.shouldLog("error")) {
-      console.error(this.formatMessage("error", message, data))
-    }
+  // Use appropriate console method based on level
+  switch (level) {
+    case "debug":
+      console.debug(JSON.stringify(logObject))
+      break
+    case "info":
+      console.info(JSON.stringify(logObject))
+      break
+    case "warn":
+      console.warn(JSON.stringify(logObject))
+      break
+    case "error":
+      console.error(JSON.stringify(logObject))
+      break
   }
 }
 
-// Export a singleton instance
-export const logger = new Logger({
-  level: process.env.NODE_ENV === "production" ? "info" : "debug",
-  prefix: "LLMGraph",
-})
+/**
+ * Sanitize context to remove sensitive information and handle circular references
+ */
+function sanitizeContext(context: Record<string, any>): Record<string, any> {
+  const sanitized: Record<string, any> = {}
+
+  // List of keys that might contain sensitive information
+  const sensitiveKeys = ["password", "token", "key", "secret", "authorization", "api_key", "apiKey"]
+
+  for (const [key, value] of Object.entries(context)) {
+    // Check if this is a sensitive key
+    const isKeyPotentiallySensitive = sensitiveKeys.some((sensitiveKey) =>
+      key.toLowerCase().includes(sensitiveKey.toLowerCase()),
+    )
+
+    if (isKeyPotentiallySensitive && typeof value === "string") {
+      // Redact sensitive values
+      sanitized[key] =
+        value.length > 8 ? `${value.substring(0, 4)}...${value.substring(value.length - 4)}` : "[REDACTED]"
+    } else if (value === null || value === undefined) {
+      // Pass through null/undefined
+      sanitized[key] = value
+    } else if (typeof value === "object") {
+      try {
+        // Handle objects and arrays, but avoid circular references
+        sanitized[key] = JSON.parse(JSON.stringify(value))
+      } catch (error) {
+        // If circular reference or other JSON error, provide placeholder
+        sanitized[key] = "[Complex Object]"
+      }
+    } else {
+      // Pass through primitive values
+      sanitized[key] = value
+    }
+  }
+
+  return sanitized
+}

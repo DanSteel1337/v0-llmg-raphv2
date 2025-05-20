@@ -5,12 +5,13 @@
  * This is a mock implementation for testing purposes.
  *
  * Dependencies:
- * - @/lib/api-utils for API response handling
+ * - @/utils/errorHandling for error handling
  */
 
 import type { NextRequest } from "next/server"
 import { NextResponse } from "next/server"
-import { withErrorHandling } from "@/lib/error-handler"
+import { withErrorHandling } from "@/utils/errorHandling"
+import { logger } from "@/lib/utils/logger"
 
 export const runtime = "edge"
 
@@ -19,8 +20,11 @@ export const GET = withErrorHandling(async (request: NextRequest) => {
   const path = searchParams.get("path")
 
   if (!path) {
+    logger.error("Document file request missing path parameter")
     return NextResponse.json({ error: "Path parameter is required" }, { status: 400 })
   }
+
+  logger.info(`GET /api/documents/file - Retrieving document file`, { path })
 
   // This is a mock implementation that returns sample content based on the file path
   // In a real implementation, you would retrieve the file from storage
@@ -62,6 +66,8 @@ By processing this document, we can verify that the entire pipeline is working c
 
 Generated for testing purposes at ${new Date().toISOString()}.
 `
+
+  logger.info(`GET /api/documents/file - Returning mock content`, { fileName, contentLength: sampleContent.length })
 
   return new NextResponse(sampleContent, {
     headers: {

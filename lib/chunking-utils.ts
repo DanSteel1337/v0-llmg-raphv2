@@ -37,25 +37,82 @@ function isInformativeChunk(text: string): boolean {
 }
 
 /**
- * Chunks a document into smaller pieces for processing
+ * Split a document into chunks with optional overlap
+ *
+ * @param text The document text to chunk
+ * @param maxChunkSize Maximum size of each chunk
+ * @param overlap Number of characters to overlap between chunks
+ * @returns Array of text chunks
  */
-export function chunkDocument(text: string, maxChunkSize: number, overlap = 100): string[] {
+export function chunkDocument(text: string, maxChunkSize = 1500, overlap = 150): string[] {
+  if (!text || typeof text !== "string") {
+    console.error("Invalid text provided for chunking:", text)
+    return []
+  }
+
+  // Normalize line endings and remove excessive whitespace
+  const normalizedText = text
+    .replace(/\r\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+
+  if (normalizedText.length === 0) {
+    return []
+  }
+
   // If text is smaller than max chunk size, return it as a single chunk
-  if (text.length <= maxChunkSize) {
-    return isInformativeChunk(text) ? [text] : []
+  if (normalizedText.length <= maxChunkSize) {
+    return [normalizedText]
   }
 
-  // First try to split by natural sections like paragraphs
-  const paragraphs = text.split(/\n\s*\n/)
+  const chunks: string[] = []
+  let startIndex = 0
 
-  // If we have multiple paragraphs and they're all smaller than the max size,
-  // we can group them into chunks
-  if (paragraphs.length > 1 && paragraphs.every((p) => p.length < maxChunkSize)) {
-    return groupParagraphsIntoChunks(paragraphs, maxChunkSize, overlap)
+  while (startIndex < normalizedText.length) {
+    // Determine end index for this chunk
+    let endIndex = startIndex + maxChunkSize
+
+    // If we're at the end of the text, just use the remainder
+    if (endIndex >= normalizedText.length) {
+      chunks.push(normalizedText.slice(startIndex))
+      break
+    }
+
+    // Try to find a natural break point (paragraph, sentence, or word boundary)
+    // Look for paragraph break
+    let breakIndex = normalizedText.lastIndexOf("\n\n", endIndex)
+    if (breakIndex > startIndex && breakIndex > endIndex - 200) {
+      endIndex = breakIndex + 2 // Include the newlines
+    } else {
+      // Look for sentence break (period followed by space or newline)
+      breakIndex = normalizedText.lastIndexOf(". ", endIndex)
+      if (breakIndex === -1) breakIndex = normalizedText.lastIndexOf(".\n", endIndex)
+
+      if (breakIndex > startIndex && breakIndex > endIndex - 100) {
+        endIndex = breakIndex + 2 // Include the period and space/newline
+      } else {
+        // Fall back to word boundary
+        breakIndex = normalizedText.lastIndexOf(" ", endIndex)
+        if (breakIndex > startIndex) {
+          endIndex = breakIndex + 1 // Include the space
+        }
+        // If no good break point found, just use the max length
+      }
+    }
+
+    // Add the chunk
+    chunks.push(normalizedText.slice(startIndex, endIndex))
+
+    // Move start index for next chunk, accounting for overlap
+    startIndex = endIndex - overlap
+
+    // Ensure we're making progress
+    if (startIndex >= normalizedText.length) {
+      break
+    }
   }
 
-  // Otherwise, fall back to splitting text directly
-  return splitTextIntoChunks(text, maxChunkSize, overlap)
+  return chunks
 }
 
 /**
@@ -93,70 +150,6 @@ function groupParagraphsIntoChunks(paragraphs: string[], maxChunkSize: number, o
   // Add the last chunk if it's not empty and is informative
   if (currentChunk && isInformativeChunk(currentChunk)) {
     chunks.push(currentChunk)
-  }
-
-  return chunks
-}
-
-/**
- * Splits text into chunks of a specified size
- */
-export function splitTextIntoChunks(text: string, maxChunkSize: number, overlap = 100): string[] {
-  const chunks: string[] = []
-
-  // If text is smaller than max chunk size, return it as a single chunk if informative
-  if (text.length <= maxChunkSize) {
-    return isInformativeChunk(text) ? [text] : []
-  }
-
-  let startIndex = 0
-
-  while (startIndex < text.length) {
-    // Calculate end index for this chunk
-    let endIndex = startIndex + maxChunkSize
-
-    // If we're not at the end of the text, try to find a natural break point
-    if (endIndex < text.length) {
-      // Look for a period, question mark, or exclamation mark followed by a space or newline
-      const naturalBreakMatch = text
-        .substring(Math.max(endIndex - 100, startIndex), Math.min(endIndex + 100, text.length))
-        .match(/[.!?]\s+/)
-
-      if (naturalBreakMatch && naturalBreakMatch.index !== undefined) {
-        // Adjust endIndex to the natural break point
-        endIndex = Math.max(endIndex - 100, startIndex) + naturalBreakMatch.index + naturalBreakMatch[0].length
-      } else {
-        // If no natural break found, look for a space
-        const lastSpace = text.lastIndexOf(" ", endIndex)
-        if (lastSpace > startIndex) {
-          endIndex = lastSpace + 1
-        }
-      }
-    } else {
-      // If we're at the end of the text, just use the end
-      endIndex = text.length
-    }
-
-    // Extract the chunk
-    const chunk = text.substring(startIndex, endIndex)
-
-    // Only add informative chunks
-    if (isInformativeChunk(chunk)) {
-      chunks.push(chunk)
-    } else {
-      console.log("Skipping non-informative chunk", {
-        chunkLength: chunk.length,
-        chunkSample: chunk.substring(0, 50) + "...",
-      })
-    }
-
-    // Move the start index for the next chunk, accounting for overlap
-    startIndex = endIndex - overlap
-
-    // Make sure we're making progress
-    if (startIndex >= endIndex) {
-      startIndex = endIndex
-    }
   }
 
   return chunks

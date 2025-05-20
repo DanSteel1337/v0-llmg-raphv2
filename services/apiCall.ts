@@ -13,12 +13,11 @@
  * @returns Typed response data
  * @throws Error with message from API or fetch operation
  */
-export async function apiCall<T>(url: string, options: RequestInit = {}): Promise<T> {
+export async function apiCall<T>(url: string, options?: RequestInit): Promise<T> {
   try {
-    // Add default headers if not present
+    // Add default headers if not provided
     const headers = {
-      ...(options.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
-      ...options.headers,
+      ...(options?.headers || {}),
     }
 
     // Execute fetch operation with combined options
@@ -27,20 +26,24 @@ export async function apiCall<T>(url: string, options: RequestInit = {}): Promis
       headers,
     })
 
-    // Handle unsuccessful status codes
+    // Log non-OK responses for debugging
     if (!response.ok) {
-      let errorMessage: string
+      console.error(`API call failed: ${response.status} ${response.statusText}`, { url, options })
 
+      // Try to parse error response
+      let errorData: any
       try {
-        // Try to parse error response as JSON
-        const errorData = await response.json()
-        errorMessage = errorData?.error || errorData?.message || `API error: ${response.status} ${response.statusText}`
+        errorData = await response.json()
       } catch (e) {
-        // If JSON parsing fails, use status text
-        errorMessage = `API error: ${response.status} ${response.statusText}`
+        try {
+          errorData = await response.text()
+        } catch (e2) {
+          errorData = { error: `${response.status} ${response.statusText}` }
+        }
       }
 
-      throw new Error(errorMessage)
+      // Throw error with details
+      throw new Error(errorData?.error || errorData?.message || `API error: ${response.status} ${response.statusText}`)
     }
 
     // Handle empty responses (204 No Content or empty response body)
@@ -53,12 +56,12 @@ export async function apiCall<T>(url: string, options: RequestInit = {}): Promis
       const data = await response.json()
       return data as T
     } catch (error) {
-      console.error("Failed to parse JSON response:", error)
-      throw new Error("Invalid JSON response from server")
+      console.error("Error parsing API response:", error)
+      throw new Error("Invalid response format")
     }
   } catch (error) {
-    // Rethrow with descriptive message
-    console.error("API call failed:", error)
-    throw error instanceof Error ? error : new Error(String(error))
+    // Log and rethrow
+    console.error(`API call error for ${url}:`, error)
+    throw error
   }
 }

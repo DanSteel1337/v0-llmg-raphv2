@@ -113,29 +113,46 @@ export async function uploadDocument(
       fileUrl,
     })
 
-    const processResponse = await apiCall<{ success: boolean }>("/api/documents/process", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    try {
+      const processResponse = await apiCall<{ success: boolean; status?: string; message?: string; error?: string }>(
+        "/api/documents/process",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            documentId: document.id,
+            userId,
+            filePath: document.file_path,
+            fileName: file.name,
+            fileType: file.type,
+            fileUrl,
+          }),
+        },
+      )
+
+      // Log the full response for debugging
+      console.log("Document processing response:", processResponse)
+
+      if (!processResponse?.success) {
+        const errorMessage = processResponse?.error || "Unknown error"
+        console.error("Document processing failed to start:", { error: errorMessage, response: processResponse })
+        throw new Error(`Failed to start document processing: ${errorMessage}`)
+      }
+
+      console.log("Document processing triggered:", {
         documentId: document.id,
-        userId,
         filePath: document.file_path,
-        fileName: file.name,
-        fileType: file.type,
         fileUrl,
-      }),
-    })
-
-    if (!processResponse?.success) {
-      console.error("Document processing failed to start:", processResponse)
-      throw new Error("Failed to start document processing")
+        status: processResponse.status || "processing",
+      })
+    } catch (processError) {
+      console.error("Error triggering document processing:", processError)
+      throw new Error(
+        `Failed to start document processing: ${
+          processError instanceof Error ? processError.message : "Unknown error"
+        }`,
+      )
     }
-
-    console.log("Document processing triggered:", {
-      documentId: document.id,
-      filePath: document.file_path,
-      fileUrl,
-    })
 
     // Poll for document status updates if progress callback provided
     if (onProgress) {
