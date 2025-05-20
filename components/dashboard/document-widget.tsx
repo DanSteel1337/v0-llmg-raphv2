@@ -216,6 +216,11 @@ export function DocumentWidget({ userId, limit = 5 }: DocumentWidgetProps) {
   }
 
   const handleRetryProcessing = async (documentId: string) => {
+    if (!retryDocumentProcessing) {
+      addToast("Retry functionality not available", "error")
+      return
+    }
+
     try {
       await retryDocumentProcessing(documentId)
       addToast("Document processing retry initiated", "success")
@@ -319,7 +324,10 @@ export function DocumentWidget({ userId, limit = 5 }: DocumentWidgetProps) {
         {showDebugPanel && selectedDocument && (
           <div className="mt-4">
             <h3 className="text-sm font-medium text-gray-700 mb-2">Document Debug Information</h3>
-            <DocumentDebug document={selectedDocument} onRetry={handleRetryProcessing} />
+            <DocumentDebug
+              document={selectedDocument}
+              onRetry={retryDocumentProcessing ? handleRetryProcessing : undefined}
+            />
           </div>
         )}
       </div>

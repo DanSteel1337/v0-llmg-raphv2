@@ -21,7 +21,7 @@ import { useToast } from "@/components/toast"
 
 interface DocumentDebugProps {
   document: any
-  onRetry: (documentId: string) => Promise<void>
+  onRetry?: (documentId: string) => Promise<void>
 }
 
 export function DocumentDebug({ document, onRetry }: DocumentDebugProps) {
@@ -41,6 +41,11 @@ export function DocumentDebug({ document, onRetry }: DocumentDebugProps) {
   }
 
   const handleRetry = async () => {
+    if (!onRetry) {
+      addToast("Retry function not available", "error")
+      return
+    }
+
     try {
       setIsRetrying(true)
       await onRetry(document.id)
@@ -142,7 +147,7 @@ export function DocumentDebug({ document, onRetry }: DocumentDebugProps) {
           </div>
         )}
 
-        {document.status !== "processing" && (
+        {document.status !== "processing" && onRetry && (
           <div className="mt-3">
             <button
               onClick={handleRetry}
