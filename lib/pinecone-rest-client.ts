@@ -92,7 +92,15 @@ export async function upsertVectors(vectors: any[], namespace = "") {
         validateVectorDimension(vector.values)
 
         // Validate vector is not all zeros
-        return !vector.values.every((v) => v === 0)
+        const isAllZeros = vector.values.every((v: number) => v === 0)
+        if (isAllZeros) {
+          console.error("Rejecting vector with all zeros", {
+            vectorId: vector.id,
+          })
+          return false
+        }
+
+        return true
       } catch (error) {
         console.error("Rejecting invalid vector", {
           vectorId: vector.id,
@@ -168,6 +176,12 @@ export async function queryVectors(
 
     // Validate query vector dimension
     validateVectorDimension(vector)
+
+    // Check if vector contains only zeros
+    const isAllZeros = vector.every((v) => v === 0)
+    if (isAllZeros) {
+      throw new Error("Invalid vector: contains only zeros")
+    }
 
     const queryBody: any = {
       vector,

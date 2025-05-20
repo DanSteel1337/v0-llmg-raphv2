@@ -30,6 +30,17 @@ If the answer is not in the context, say that you don't know.
 Always cite your sources using [Document: Title] format at the end of relevant sentences.`
 
 /**
+ * Creates a placeholder vector with small non-zero values
+ * This prevents Pinecone from rejecting the vector for being all zeros
+ */
+function createPlaceholderVector() {
+  // Create a vector with small random values instead of zeros
+  return Array(VECTOR_DIMENSION)
+    .fill(0)
+    .map(() => Math.random() * 0.001)
+}
+
+/**
  * Creates a new conversation
  */
 export async function createConversation(userId: string, title?: string): Promise<Conversation> {
@@ -45,13 +56,13 @@ export async function createConversation(userId: string, title?: string): Promis
     message_count: 0,
   }
 
-  // Create a zero vector with the correct dimension
-  const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+  // Create a placeholder vector with small non-zero values
+  const placeholderVector = createPlaceholderVector()
 
   await upsertVectors([
     {
       id: conversationId,
-      values: zeroVector, // Zero vector with correct dimension
+      values: placeholderVector, // Placeholder vector with small non-zero values
       metadata: {
         ...conversation,
         record_type: "conversation",
@@ -67,12 +78,12 @@ export async function createConversation(userId: string, title?: string): Promis
  */
 export async function getConversationCountByUserId(userId: string): Promise<number> {
   try {
-    // Create a zero vector with the correct dimension
-    const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+    // Create a placeholder vector with small non-zero values
+    const placeholderVector = createPlaceholderVector()
 
     // Query Pinecone for conversations with the specified user_id
     const response = await queryVectors(
-      zeroVector,
+      placeholderVector,
       10000, // Use a high limit, but be aware of potential truncation
       true,
       {
@@ -100,11 +111,11 @@ export async function getConversationCountByUserId(userId: string): Promise<numb
  * Gets all conversations for a user
  */
 export async function getConversationsByUserId(userId: string): Promise<Conversation[]> {
-  // Create a zero vector with the correct dimension
-  const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+  // Create a placeholder vector with small non-zero values
+  const placeholderVector = createPlaceholderVector()
 
   const response = await queryVectors(
-    zeroVector, // Zero vector with correct dimension
+    placeholderVector, // Placeholder vector with small non-zero values
     100,
     true,
     {
@@ -136,11 +147,11 @@ export async function getConversationsByUserId(userId: string): Promise<Conversa
  * Gets a conversation by ID
  */
 export async function getConversationById(id: string): Promise<Conversation | null> {
-  // Create a zero vector with the correct dimension
-  const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+  // Create a placeholder vector with small non-zero values
+  const placeholderVector = createPlaceholderVector()
 
   const response = await queryVectors(
-    zeroVector, // Zero vector with correct dimension
+    placeholderVector, // Placeholder vector with small non-zero values
     1,
     true,
     {
@@ -191,13 +202,13 @@ export async function updateConversationTitle(id: string, title: string): Promis
     updated_at: new Date().toISOString(),
   }
 
-  // Create a zero vector with the correct dimension
-  const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+  // Create a placeholder vector with small non-zero values
+  const placeholderVector = createPlaceholderVector()
 
   await upsertVectors([
     {
       id,
-      values: zeroVector, // Zero vector with correct dimension
+      values: placeholderVector, // Placeholder vector with small non-zero values
       metadata: {
         ...updatedConversation,
         record_type: "conversation",
@@ -215,12 +226,12 @@ export async function deleteConversation(id: string): Promise<void> {
   // Delete the conversation
   await deleteVectors([id])
 
-  // Create a zero vector with the correct dimension
-  const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+  // Create a placeholder vector with small non-zero values
+  const placeholderVector = createPlaceholderVector()
 
   // Find all messages for this conversation
   const response = await queryVectors(
-    zeroVector, // Zero vector with correct dimension
+    placeholderVector, // Placeholder vector with small non-zero values
     1000,
     true,
     {
@@ -243,11 +254,11 @@ export async function deleteConversation(id: string): Promise<void> {
  * Gets all messages for a conversation
  */
 export async function getMessagesByConversationId(conversationId: string): Promise<ChatMessage[]> {
-  // Create a zero vector with the correct dimension
-  const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+  // Create a placeholder vector with small non-zero values
+  const placeholderVector = createPlaceholderVector()
 
   const response = await queryVectors(
-    zeroVector, // Zero vector with correct dimension
+    placeholderVector, // Placeholder vector with small non-zero values
     100,
     true,
     {
@@ -321,13 +332,13 @@ export async function createMessage({
   // Update conversation message count and updated_at
   const conversation = await getConversationById(conversationId)
   if (conversation) {
-    // Create a zero vector with the correct dimension
-    const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+    // Create a placeholder vector with small non-zero values
+    const placeholderVector = createPlaceholderVector()
 
     await upsertVectors([
       {
         id: conversationId,
-        values: zeroVector, // Zero vector with correct dimension
+        values: placeholderVector, // Placeholder vector with small non-zero values
         metadata: {
           ...conversation,
           message_count: conversation.message_count + 1,

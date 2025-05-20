@@ -62,6 +62,7 @@
     "tailwindcss-animate": "^1.0.7",
     "uuid": "latest",
     "vaul": "^0.9.6",
+    "your-module-path": "latest",
     "zod": "^3.24.1"
   },
   "devDependencies": {

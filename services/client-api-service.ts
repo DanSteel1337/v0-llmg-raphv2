@@ -21,7 +21,14 @@ export async function uploadDocument(
   onProgress?: (progress: number) => void,
 ): Promise<Document> {
   try {
-    // First, create a document record
+    // Step 1: Create document metadata
+    console.log("Creating document metadata...", {
+      userId,
+      fileName: file.name,
+      fileType: file.type,
+      fileSize: file.size,
+    })
+
     const docResponse = await apiCall<{ document: Document }>("/api/documents", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -36,33 +43,67 @@ export async function uploadDocument(
 
     const document = docResponse?.document
     if (!document?.id || !document?.file_path) {
+      console.error("Document creation failed - missing fields:", document)
       throw new Error("Document creation failed: Missing document ID or file path")
     }
 
-    // Then, upload the file
+    console.log("Document metadata created successfully:", {
+      documentId: document.id,
+      filePath: document.file_path,
+    })
+
+    // Step 2: Upload the file
+    console.log("Uploading file content...", {
+      documentId: document.id,
+      filePath: document.file_path,
+    })
+
     const formData = new FormData()
     formData.append("file", file)
     formData.append("userId", userId)
     formData.append("documentId", document.id)
     formData.append("filePath", document.file_path)
 
-    await apiCall("/api/documents/upload", {
+    const uploadResponse = await apiCall<{ success: boolean }>("/api/documents/upload", {
       method: "POST",
       body: formData,
     })
 
-    // ✅ Process only after full upload
-    await apiCall("/api/documents/process", {
+    if (!uploadResponse?.success) {
+      console.error("File upload failed:", uploadResponse)
+      throw new Error("File upload failed")
+    }
+
+    console.log("File uploaded successfully:", {
+      documentId: document.id,
+      filePath: document.file_path,
+    })
+
+    // Step 3: Process the document
+    console.log("Triggering document processing...", {
+      documentId: document.id,
+      filePath: document.file_path,
+    })
+
+    const fileUrl = `${window.location.origin}/api/documents/file?path=${encodeURIComponent(document.file_path)}`
+
+    await apiCall<{ success: boolean }>("/api/documents/process", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         documentId: document.id,
         userId,
         filePath: document.file_path,
-        fileName: document.name,
-        fileType: document.file_type,
-        fileUrl: `${window.location.origin}/api/documents/file?path=${encodeURIComponent(document.file_path)}`,
+        fileName: file.name,
+        fileType: file.type,
+        fileUrl,
       }),
+    })
+
+    console.log("Document processing triggered:", {
+      documentId: document.id,
+      filePath: document.file_path,
+      fileUrl,
     })
 
     // Poll for document status updates
@@ -76,8 +117,16 @@ export async function uploadDocument(
             if (updatedDocument.status === "indexed" || updatedDocument.status === "failed") {
               clearInterval(pollInterval)
               onProgress(100)
+              console.log("Document processing completed:", {
+                documentId: document.id,
+                status: updatedDocument.status,
+              })
             } else if (updatedDocument.processing_progress !== undefined) {
               onProgress(updatedDocument.processing_progress)
+              console.log("Document processing progress:", {
+                documentId: document.id,
+                progress: updatedDocument.processing_progress,
+              })
             }
           }
         } catch (error) {
@@ -91,7 +140,7 @@ export async function uploadDocument(
 
     return document
   } catch (error) {
-    console.error("Document upload failed:", error)
+    console.error("Document upload pipeline failed:", error)
     throw error
   }
 }
@@ -200,7 +249,6 @@ interface Document {
   id: string
   name: string
   file_path: string
-  file_type: string
   status?: string
   processing_progress?: number
   [key: string]: any

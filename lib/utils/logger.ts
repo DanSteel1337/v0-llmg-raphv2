@@ -43,3 +43,13 @@ export function logEmbeddingConfig(model: string, dimensions: number, indexName:
     host: host.split(".")[0], // Only log the first part for security
   })
 }
+
+// Export a logger object with all logging functions
+export const logger = {
+  log,
+  debug,
+  info,
+  warn,
+  error,
+  logEmbeddingConfig,
+}

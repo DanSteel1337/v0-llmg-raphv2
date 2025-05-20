@@ -12,12 +12,12 @@ import type { NextRequest } from "next/server"
 import { handleApiRequest, extractUserId, createSuccessResponse } from "@/lib/api-utils"
 import { withErrorHandling } from "@/lib/error-handler"
 import { queryVectors } from "@/lib/pinecone-rest-client"
+import { VECTOR_DIMENSION } from "@/lib/embedding-config"
 
 export const runtime = "edge"
 
 // Maximum number of vectors to query
 const MAX_VECTORS_PER_QUERY = 10000
-const VECTOR_DIMENSION = 1536
 
 export const GET = withErrorHandling(async (request: NextRequest) => {
   return handleApiRequest(async () => {
@@ -32,7 +32,7 @@ export const GET = withErrorHandling(async (request: NextRequest) => {
         throw new Error("User ID is required")
       }
 
-      // Create a dummy vector for querying
+      // Create a dummy vector for querying with the correct dimension (3072)
       const dummyVector = new Array(VECTOR_DIMENSION).fill(0.001)
 
       // Get document count

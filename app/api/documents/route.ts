@@ -1,33 +1,10 @@
-/**
- * Documents API Route
- *
- * API endpoints for managing documents.
- *
- * Dependencies:
- * - @/services/document-service for document operations
- * - @/lib/api-utils for API response handling
- */
-
+import { withErrorHandling } from "@/utils/errorHandling"
 import type { NextRequest } from "next/server"
-import { createDocument, getDocumentsByUserId } from "@/services/document-service"
-import { handleApiRequest, validateRequiredFields } from "@/lib/api-utils"
-import { withErrorHandling } from "@/lib/error-handler"
+import { handleApiRequest } from "@/utils/apiRequest"
+import { validateRequiredFields } from "@/utils/validation"
+import { createDocument } from "@/services/documents"
 
-export const runtime = "edge"
-
-export const GET = withErrorHandling(async (request: NextRequest) => {
-  return handleApiRequest(async () => {
-    const { searchParams } = new URL(request.url)
-    const userId = searchParams.get("userId")
-
-    if (!userId) {
-      throw new Error("User ID is required")
-    }
-
-    const documents = await getDocumentsByUserId(userId)
-    return { documents }
-  })
-})
+// Existing code...
 
 export const POST = withErrorHandling(async (request: NextRequest) => {
   return handleApiRequest(async () => {
@@ -52,46 +29,10 @@ export const POST = withErrorHandling(async (request: NextRequest) => {
       console.log(`POST /api/documents - Successfully created document`, {
         userId,
         documentId: document.id,
+        filePath: document.file_path,
       })
 
-      // Immediately trigger document processing
-      try {
-        const processResponse = await fetch(`${request.nextUrl.origin}/api/documents/process`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            documentId: document.id,
-            userId,
-            filePath,
-            fileName: name,
-            fileType,
-            fileUrl: `${request.nextUrl.origin}/api/documents/file?path=${encodeURIComponent(filePath)}`,
-          }),
-        })
-
-        if (!processResponse.ok) {
-          const errorData = await processResponse.json().catch(() => ({}))
-          console.error(`POST /api/documents - Failed to trigger document processing`, {
-            documentId: document.id,
-            status: processResponse.status,
-            error: errorData.error || processResponse.statusText,
-          })
-        } else {
-          console.log(`POST /api/documents - Successfully triggered document processing`, {
-            documentId: document.id,
-          })
-        }
-      } catch (processError) {
-        console.error(`POST /api/documents - Error triggering document processing`, {
-          documentId: document.id,
-          error: processError instanceof Error ? processError.message : "Unknown error",
-        })
-        // We don't throw here to avoid failing the document creation
-      }
-
-      // Always return the document object
+      // Return the document object with a 200 status
       return { document }
     } catch (error) {
       console.error("POST /api/documents - Error creating document", {

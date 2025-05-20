@@ -23,6 +23,7 @@ export const POST = withErrorHandling(async (request: NextRequest) => {
     console.log(`POST /api/documents/process - Processing document`, {
       documentId,
       userId,
+      filePath,
       fileName,
       fileType,
     })
@@ -56,6 +57,46 @@ export const POST = withErrorHandling(async (request: NextRequest) => {
       // Update document status to processing
       await updateDocumentStatus(documentId, "processing", 5, "Starting document processing")
       console.log(`POST /api/documents/process - Updated document status to processing`, { documentId })
+
+      // Verify file is accessible before processing
+      try {
+        const fileResponse = await fetch(fileUrl)
+        if (!fileResponse.ok) {
+          console.error(`POST /api/documents/process - File not found at URL: ${fileUrl}`, {
+            status: fileResponse.status,
+            statusText: fileResponse.statusText,
+          })
+
+          await updateDocumentStatus(documentId, "failed", 0, `File not found: ${fileResponse.statusText}`)
+
+          return {
+            success: false,
+            documentId,
+            status: "failed",
+            error: "Document file not found (404)",
+          }
+        }
+      } catch (fetchError) {
+        console.error(`POST /api/documents/process - Error fetching file`, {
+          documentId,
+          fileUrl,
+          error: fetchError instanceof Error ? fetchError.message : "Unknown error",
+        })
+
+        await updateDocumentStatus(
+          documentId,
+          "failed",
+          0,
+          `Error accessing file: ${fetchError instanceof Error ? fetchError.message : "Unknown error"}`,
+        )
+
+        return {
+          success: false,
+          documentId,
+          status: "failed",
+          error: "Error accessing document file",
+        }
+      }
 
       // Process the document
       const result = await processDocument({
