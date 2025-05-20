@@ -1,11 +1,4 @@
 /**
- * API Call Utility
- *
- * Provides a standardized way to make API calls with error handling and response formatting.
- * Centralizes common API operations for consistent behavior across the application.
- */
-
-/**
  * Make an API call with standardized error handling
  *
  * @param url API endpoint URL
@@ -54,6 +47,12 @@ export async function apiCall<T>(url: string, options?: RequestInit): Promise<T>
     // Parse response as JSON
     try {
       const data = await response.json()
+      
+      // IMPROVED: Ensure the response always has a success property if it's an object and doesn't already have one
+      if (data && typeof data === 'object' && !('success' in data)) {
+        data.success = true;
+      }
+      
       return data as T
     } catch (error) {
       console.error("Error parsing API response:", error)

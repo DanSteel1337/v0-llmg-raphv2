@@ -10,10 +10,10 @@
  */
 
 "use client"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import type React from "react"
 
-import { MessageSquare, Plus, Send, AlertCircle } from "lucide-react"
+import { MessageSquare, Plus, Send, AlertCircle, ArrowLeft, User, Bot, FileText } from "lucide-react"
 import { DashboardCard } from "@/components/ui/dashboard-card"
 import { formatDate } from "@/utils/formatting"
 import { useToast } from "@/components/toast"
@@ -34,10 +34,15 @@ export function ChatWidget({ userId }: ChatWidgetProps) {
     sendMessage,
     createConversation,
     refreshConversations,
+    messages,
+    isTyping,
   } = useChat(userId)
   const [message, setMessage] = useState("")
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const { addToast } = useToast()
+
+  // Add this with the other state variables
+  const messagesContainerRef = useRef<HTMLDivElement>(null)
 
   // Handle API errors
   useEffect(() => {
@@ -104,6 +109,13 @@ export function ChatWidget({ userId }: ChatWidgetProps) {
   // Get the first 3 conversations safely
   const recentConversations = safeConversations.slice(0, 3)
 
+  // Add this useEffect for auto-scrolling
+  useEffect(() => {
+    if (messagesContainerRef.current) {
+      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight
+    }
+  }, [messages, isTyping])
+
   return (
     <DashboardCard title="Chat" description="Ask questions about your documents" isLoading={isLoadingConversations}>
       <div className="space-y-4">
@@ -119,7 +131,101 @@ export function ChatWidget({ userId }: ChatWidgetProps) {
           </div>
         )}
 
-        {!activeConversationId ? (
+        {activeConversationId ? (
+          <div className="flex flex-col h-64">
+            <div className="flex items-center justify-between mb-3">
+              <button
+                onClick={handleBackToList}
+                className="text-sm text-blue-600 hover:text-blue-800 flex items-center"
+              >
+                <ArrowLeft className="h-3 w-3 mr-1" />
+                Back
+              </button>
+              <span className="text-sm font-medium">
+                {safeConversations.find((c) => c.id === activeConversationId)?.title || "Conversation"}
+              </span>
+            </div>
+
+            <div className="flex-1 bg-gray-50 rounded-md p-3 mb-3 overflow-y-auto" ref={messagesContainerRef}>
+              {messages.length === 0 ? (
+                <div className="text-center text-gray-500 text-sm py-4">
+                  Start asking questions about your documents.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {messages.map((msg) => (
+                    <div key={msg.id} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                      <div
+                        className={`max-w-[85%] rounded-lg px-3 py-2 ${
+                          msg.role === "user"
+                            ? "bg-blue-100 text-blue-900"
+                            : "bg-white border border-gray-200 text-gray-800"
+                        }`}
+                      >
+                        <div className="flex items-center mb-1">
+                          {msg.role === "user" ? <User className="h-3 w-3 mr-1" /> : <Bot className="h-3 w-3 mr-1" />}
+                          <span className="text-xs font-medium">{msg.role === "user" ? "You" : "AI Assistant"}</span>
+                        </div>
+                        <div className="text-sm whitespace-pre-wrap">{msg.content}</div>
+                        {msg.sources && msg.sources.length > 0 && (
+                          <div className="mt-2 pt-2 border-t border-gray-200">
+                            <div className="text-xs text-gray-500 font-medium">Sources:</div>
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {msg.sources.map((source, idx) => (
+                                <div
+                                  key={idx}
+                                  className="flex items-center text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded"
+                                >
+                                  <FileText className="h-3 w-3 mr-1" />
+                                  {source}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {isTyping && (
+                    <div className="flex justify-start">
+                      <div className="bg-white border border-gray-200 rounded-lg px-3 py-2 max-w-[85%]">
+                        <div className="flex items-center space-x-1">
+                          <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce"></div>
+                          <div
+                            className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce"
+                            style={{ animationDelay: "0.2s" }}
+                          ></div>
+                          <div
+                            className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce"
+                            style={{ animationDelay: "0.4s" }}
+                          ></div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <form onSubmit={handleSendMessage} className="flex">
+              <input
+                type="text"
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                placeholder="Type your message..."
+                className="flex-1 border border-gray-300 rounded-l-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                disabled={isTyping}
+              />
+              <button
+                type="submit"
+                className="bg-blue-600 text-white px-4 py-2 rounded-r-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={isTyping || !message.trim()}
+              >
+                <Send className="h-4 w-4" />
+              </button>
+            </form>
+          </div>
+        ) : (
           <>
             <button
               onClick={handleNewChat}
@@ -158,37 +264,6 @@ export function ChatWidget({ userId }: ChatWidgetProps) {
               </div>
             )}
           </>
-        ) : (
-          <div className="flex flex-col h-64">
-            <div className="flex items-center justify-between mb-3">
-              <button onClick={handleBackToList} className="text-sm text-blue-600 hover:text-blue-800">
-                ← Back to conversations
-              </button>
-              <span className="text-sm font-medium">
-                {safeConversations.find((c) => c.id === activeConversationId)?.title || "Conversation"}
-              </span>
-            </div>
-
-            <div className="flex-1 bg-gray-50 rounded-md p-3 mb-3 overflow-y-auto">
-              <div className="text-center text-gray-500 text-sm py-4">Start asking questions about your documents.</div>
-            </div>
-
-            <form onSubmit={handleSendMessage} className="flex">
-              <input
-                type="text"
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                placeholder="Type your message..."
-                className="flex-1 border border-gray-300 rounded-l-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              />
-              <button
-                type="submit"
-                className="bg-blue-600 text-white px-4 py-2 rounded-r-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <Send className="h-4 w-4" />
-              </button>
-            </form>
-          </div>
         )}
       </div>
     </DashboardCard>

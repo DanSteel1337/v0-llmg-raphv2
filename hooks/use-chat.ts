@@ -10,7 +10,7 @@
  * - Message sending and retrieval
  * - State tracking for loading and typing indicators
  * - Error handling and reporting
- * 
+ *
  * Dependencies:
  * - @/hooks/use-api for standardized API interactions
  * - @/services/client-api-service for backend communication
@@ -46,7 +46,7 @@ export function useChat(userId: string, initialConversationId?: string) {
       console.log("No active conversation, skipping fetchMessages")
       return Promise.resolve([])
     }
-    
+
     console.log(`Fetching messages for conversation: ${activeConversationId}`)
     return fetchMessages(activeConversationId)
   }, [activeConversationId])
@@ -57,7 +57,7 @@ export function useChat(userId: string, initialConversationId?: string) {
       console.log("No userId provided, skipping fetchConversations")
       return Promise.resolve([])
     }
-    
+
     console.log(`Fetching conversations for user: ${safeUserId}`)
     return fetchConversations(safeUserId)
   }, [safeUserId])
@@ -84,10 +84,14 @@ export function useChat(userId: string, initialConversationId?: string) {
       throw new Error("User ID is required to create a conversation")
     }
 
+    if (!title || typeof title !== "string" || title.trim() === "") {
+      throw new Error("Conversation title cannot be empty")
+    }
+
     try {
       console.log(`Creating conversation with title: ${title}`)
       const conversation = await apiCreateConversation(safeUserId, title)
-      
+
       if (!conversation?.id) {
         throw new Error("Failed to create conversation: No conversation ID returned")
       }
@@ -106,62 +110,73 @@ export function useChat(userId: string, initialConversationId?: string) {
   const sendMessage = async (content: string) => {
     // Enhanced validation
     if (!activeConversationId) {
-      console.error("Cannot send message: No active conversation");
-      throw new Error("No active conversation");
+      console.error("Cannot send message: No active conversation")
+      throw new Error("No active conversation")
     }
 
     if (!safeUserId) {
-      console.error("Cannot send message: No user ID");
-      throw new Error("User ID is required to send a message");
+      console.error("Cannot send message: No user ID")
+      throw new Error("User ID is required to send a message")
     }
 
-    if (!content || typeof content !== 'string' || content.trim() === "") {
-      console.error("Cannot send message: Empty content", { 
+    if (!content || typeof content !== "string" || content.trim() === "") {
+      console.error("Cannot send message: Empty content", {
         contentType: typeof content,
-        contentLength: typeof content === 'string' ? content.length : 0
-      });
-      throw new Error("Message content cannot be empty");
+        contentLength: typeof content === "string" ? content.length : 0,
+      })
+      throw new Error("Message content cannot be empty")
     }
 
-    setIsTyping(true);
+    setIsTyping(true)
 
     try {
-      console.log(`Sending message to conversation: ${activeConversationId}`);
-      
+      console.log(`Sending message to conversation: ${activeConversationId}`)
+
       // Log the exact message being sent
-      console.log('Sending message with exact content:', {
+      console.log("Sending message with exact content:", {
         conversationId: activeConversationId,
         content, // Log full content
         contentLength: content.length,
-        userId: safeUserId
-      });
-      
-      await apiSendMessage(activeConversationId, content, safeUserId);
-      
+        userId: safeUserId,
+      })
+
+      // Add the user message to the local state immediately for optimistic UI update
+      const tempUserMessage: ChatMessage = {
+        id: `temp_${Date.now()}`,
+        conversation_id: activeConversationId,
+        role: "user",
+        content,
+        created_at: new Date().toISOString(),
+      }
+
+      setMessages((prev) => [...prev, tempUserMessage])
+
+      await apiSendMessage(activeConversationId, content, safeUserId)
+
       // Reload messages to get the new message and response
-      await loadMessages();
-      setRetryCount(0); // Reset retry count on success
-      return true;
+      await loadMessages()
+      setRetryCount(0) // Reset retry count on success
+      return true
     } catch (error) {
       console.error("Error sending message:", {
         error: error instanceof Error ? error.message : String(error),
         conversationId: activeConversationId,
         contentType: typeof content,
-        contentLength: content.length
-      });
-      
+        contentLength: content.length,
+      })
+
       // Implement retry logic for transient errors
       if (retryCount < 2) {
-        console.log(`Retrying send message (${retryCount + 1}/2)...`);
-        setRetryCount(prev => prev + 1);
+        console.log(`Retrying send message (${retryCount + 1}/2)...`)
+        setRetryCount((prev) => prev + 1)
         // Wait briefly before retrying
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        return sendMessage(content);
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+        return sendMessage(content)
       }
-      
-      throw error;
+
+      throw error
     } finally {
-      setIsTyping(false);
+      setIsTyping(false)
     }
   }
 

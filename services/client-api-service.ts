@@ -142,7 +142,7 @@ export async function uploadDocument(
     });
 
     try {
-      const processResponse = await apiCall<{ success: boolean; status?: string; message?: string; error?: string }>(
+      const processResponse = await apiCall<{ success?: boolean; status?: string; message?: string; error?: string }>(
         "/api/documents/process",
         {
           method: "POST",
@@ -161,7 +161,8 @@ export async function uploadDocument(
       // Log the full response for debugging
       console.log("Document processing response:", processResponse);
 
-      if (!processResponse?.success) {
+      // IMPROVED: Better error handling for response validation
+      if (!processResponse || processResponse.success !== true) {
         const errorMessage = processResponse?.error || "Unknown error";
         console.error("Document processing failed to start:", { error: errorMessage, response: processResponse });
         throw new Error(`Failed to start document processing: ${errorMessage}`);

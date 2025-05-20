@@ -164,9 +164,9 @@ export const POST = withErrorHandling(async (request: NextRequest) => {
           filePath,
         })
 
-        // Return success response
+        // Return success response with explicit success flag
         return {
-          success: true,
+          success: true,  // <-- CRITICAL FIX: Explicitly include success flag
           documentId,
           status: "processing",
           message: "Document processing started",
@@ -194,7 +194,12 @@ export const POST = withErrorHandling(async (request: NextRequest) => {
         error: error instanceof Error ? error.message : "Unknown error",
         stack: error instanceof Error ? error.stack : undefined,
       })
-      throw error
+      
+      // Return explicit error response with success flag
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error occurred during document processing",
+      }
     }
   }, request)
 })

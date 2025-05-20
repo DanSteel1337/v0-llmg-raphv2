@@ -23,6 +23,7 @@ import {
   ChevronDown,
   ChevronUp,
   HelpCircle,
+  RefreshCw,
 } from "lucide-react"
 import { DashboardCard } from "@/components/ui/dashboard-card"
 import { useAnalytics } from "@/hooks/use-analytics"
@@ -117,7 +118,10 @@ export function AnalyticsWidget({ userId }: AnalyticsWidgetProps) {
             style={{ cursor: healthErrors?.pinecone ? "pointer" : "default" }}
           >
             {pineconeApiHealthy === null ? (
-              <span className="animate-pulse">Checking Pinecone...</span>
+              <div className="flex items-center">
+                <div className="animate-spin h-3 w-3 border-2 border-gray-500 border-t-transparent rounded-full mr-1"></div>
+                <span>Checking Pinecone...</span>
+              </div>
             ) : pineconeApiHealthy ? (
               <>
                 <Check className="h-4 w-4" />
@@ -144,7 +148,10 @@ export function AnalyticsWidget({ userId }: AnalyticsWidgetProps) {
             style={{ cursor: healthErrors?.openai ? "pointer" : "default" }}
           >
             {openaiApiHealthy === null ? (
-              <span className="animate-pulse">Checking OpenAI...</span>
+              <div className="flex items-center">
+                <div className="animate-spin h-3 w-3 border-2 border-gray-500 border-t-transparent rounded-full mr-1"></div>
+                <span>Checking OpenAI...</span>
+              </div>
             ) : openaiApiHealthy ? (
               <>
                 <Check className="h-4 w-4" />
@@ -159,24 +166,27 @@ export function AnalyticsWidget({ userId }: AnalyticsWidgetProps) {
             )}
           </div>
 
-          {isCheckingHealth && (
-            <button
-              onClick={refreshAnalytics}
-              className="px-3 py-1 rounded-full text-sm bg-blue-100 text-blue-800 flex items-center gap-1"
-              disabled={isCheckingHealth}
-            >
-              <span className="animate-pulse">Checking APIs...</span>
-            </button>
-          )}
-
-          {!isCheckingHealth && (
-            <button
-              onClick={refreshAnalytics}
-              className="px-3 py-1 rounded-full text-sm bg-blue-100 text-blue-800 flex items-center gap-1"
-            >
-              <span>Refresh</span>
-            </button>
-          )}
+          <button
+            onClick={refreshAnalytics}
+            className={`px-3 py-1 rounded-full text-sm flex items-center gap-1 ${
+              isCheckingHealth
+                ? "bg-gray-100 text-gray-800 cursor-not-allowed"
+                : "bg-blue-100 text-blue-800 hover:bg-blue-200"
+            }`}
+            disabled={isCheckingHealth}
+          >
+            {isCheckingHealth ? (
+              <div className="flex items-center">
+                <div className="animate-spin h-3 w-3 border-2 border-gray-500 border-t-transparent rounded-full mr-1"></div>
+                <span>Refreshing...</span>
+              </div>
+            ) : (
+              <>
+                <RefreshCw className="h-3 w-3 mr-1" />
+                <span>Refresh</span>
+              </>
+            )}
+          </button>
         </div>
 
         {/* Error Details */}
@@ -227,10 +237,17 @@ export function AnalyticsWidget({ userId }: AnalyticsWidgetProps) {
               </div>
             </div>
             <p className="mt-2 text-sm font-medium text-gray-500">Documents</p>
-            <p className="text-2xl font-semibold text-gray-900">
-              {metrics.documentCount}
-              {mightBeTruncated.documents && "+"}
-            </p>
+            <div className="flex items-baseline">
+              <p className="text-2xl font-semibold text-gray-900">
+                {metrics.documentCount}
+                {mightBeTruncated.documents && "+"}
+              </p>
+              {metrics.documentCount > 0 && (
+                <p className="ml-2 text-xs text-gray-500">
+                  {Math.round((metrics.documentCount / (metrics.documentCount + metrics.chunkCount)) * 100)}% of vectors
+                </p>
+              )}
+            </div>
           </div>
 
           <div className="bg-green-50 p-4 rounded-lg">
@@ -240,10 +257,17 @@ export function AnalyticsWidget({ userId }: AnalyticsWidgetProps) {
               </div>
             </div>
             <p className="mt-2 text-sm font-medium text-gray-500">Searches</p>
-            <p className="text-2xl font-semibold text-gray-900">
-              {metrics.searchCount}
-              {mightBeTruncated.searches && "+"}
-            </p>
+            <div className="flex items-baseline">
+              <p className="text-2xl font-semibold text-gray-900">
+                {metrics.searchCount}
+                {mightBeTruncated.searches && "+"}
+              </p>
+              {metrics.searchCount > 0 && metrics.documentCount > 0 && (
+                <p className="ml-2 text-xs text-gray-500">
+                  {Math.round((metrics.searchCount / metrics.documentCount) * 10) / 10} per doc
+                </p>
+              )}
+            </div>
           </div>
 
           <div className="bg-purple-50 p-4 rounded-lg">
@@ -253,10 +277,17 @@ export function AnalyticsWidget({ userId }: AnalyticsWidgetProps) {
               </div>
             </div>
             <p className="mt-2 text-sm font-medium text-gray-500">Chats</p>
-            <p className="text-2xl font-semibold text-gray-900">
-              {metrics.chatCount}
-              {mightBeTruncated.chats && "+"}
-            </p>
+            <div className="flex items-baseline">
+              <p className="text-2xl font-semibold text-gray-900">
+                {metrics.chatCount}
+                {mightBeTruncated.chats && "+"}
+              </p>
+              {metrics.chatCount > 0 && metrics.documentCount > 0 && (
+                <p className="ml-2 text-xs text-gray-500">
+                  {Math.round((metrics.chatCount / metrics.documentCount) * 10) / 10} per doc
+                </p>
+              )}
+            </div>
           </div>
 
           <div className="bg-amber-50 p-4 rounded-lg">
@@ -266,10 +297,17 @@ export function AnalyticsWidget({ userId }: AnalyticsWidgetProps) {
               </div>
             </div>
             <p className="mt-2 text-sm font-medium text-gray-500">Chunks</p>
-            <p className="text-2xl font-semibold text-gray-900">
-              {metrics.chunkCount}
-              {mightBeTruncated.chunks && "+"}
-            </p>
+            <div className="flex items-baseline">
+              <p className="text-2xl font-semibold text-gray-900">
+                {metrics.chunkCount}
+                {mightBeTruncated.chunks && "+"}
+              </p>
+              {metrics.chunkCount > 0 && metrics.documentCount > 0 && (
+                <p className="ml-2 text-xs text-gray-500">
+                  {Math.round((metrics.chunkCount / metrics.documentCount) * 10) / 10} per doc
+                </p>
+              )}
+            </div>
           </div>
         </div>
 

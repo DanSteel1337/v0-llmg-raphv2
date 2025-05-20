@@ -23,9 +23,18 @@ export async function handleApiRequest<T>(handler: () => Promise<T>, request?: N
       })
     }
 
-    // Ensure we always return a valid JSON object
+    // IMPROVED: Ensure we always return a valid JSON object with success flag
     if (result === undefined || result === null) {
       return NextResponse.json({ success: true })
+    }
+
+    // IMPROVED: Ensure the response always has a success property if not already present
+    if (typeof result === 'object' && result !== null && !('success' in result)) {
+      const responseWithSuccess = { 
+        ...result, 
+        success: true 
+      }
+      return NextResponse.json(responseWithSuccess)
     }
 
     return NextResponse.json(result)

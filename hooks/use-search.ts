@@ -10,7 +10,7 @@
 
 "use client"
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect } from "react"
 import { useApi } from "@/hooks/use-api"
 import { performSearch } from "@/services/client-api-service"
 import type { SearchResult, SearchOptions } from "@/types"
@@ -19,6 +19,7 @@ export function useSearch(userId: string) {
   const [searchOptions, setSearchOptions] = useState<SearchOptions>({
     type: "semantic",
   })
+  const [recentSearches, setRecentSearches] = useState<string[]>([])
 
   // Wrap the search function with useCallback
   const searchCallback = useCallback(
@@ -30,28 +31,58 @@ export function useSearch(userId: string) {
 
   const { data: results, isLoading, error, execute: executeSearch } = useApi<SearchResult[], [string]>(searchCallback)
 
+  // Load recent searches on mount
+  useEffect(() => {
+    setRecentSearches(getRecentSearches())
+  }, [])
+
   // Save search to local storage
   const saveSearchToHistory = (query: string) => {
     if (typeof window !== "undefined") {
-      const searches = JSON.parse(localStorage.getItem("recentSearches") || "[]")
+      const searches = getRecentSearches()
       if (!searches.includes(query)) {
         searches.unshift(query)
         if (searches.length > 5) searches.pop()
         localStorage.setItem("recentSearches", JSON.stringify(searches))
+        setRecentSearches(searches)
       }
     }
   }
 
   const search = async (query: string) => {
-    if (!query.trim()) return []
+    if (!query || typeof query !== "string") {
+      throw new Error("Search query cannot be empty")
+    }
+
+    const trimmedQuery = query.trim()
+    if (!trimmedQuery) {
+      return []
+    }
+
+    if (trimmedQuery.length < 2) {
+      throw new Error("Search query must be at least 2 characters")
+    }
 
     try {
-      const results = await executeSearch(query)
-      saveSearchToHistory(query)
+      const results = await executeSearch(trimmedQuery)
+      saveSearchToHistory(trimmedQuery)
       return results
     } catch (error) {
       console.error("Search error:", error)
       throw error
+    }
+  }
+
+  // Get recent searches from local storage
+  const getRecentSearches = (): string[] => {
+    if (typeof window === "undefined") return []
+
+    try {
+      const searches = JSON.parse(localStorage.getItem("recentSearches") || "[]")
+      return Array.isArray(searches) ? searches : []
+    } catch (error) {
+      console.error("Error parsing recent searches:", error)
+      return []
     }
   }
 
@@ -62,5 +93,6 @@ export function useSearch(userId: string) {
     search,
     setSearchOptions,
     searchOptions,
+    recentSearches,
   }
 }

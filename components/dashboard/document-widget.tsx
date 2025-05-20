@@ -3,7 +3,7 @@
  *
  * A dashboard widget for document upload and listing.
  * Handles optimistic UI updates and monitors document processing progress.
- * 
+ *
  * Dependencies:
  * - @/components/ui/dashboard-card for layout
  * - @/hooks/use-documents for document operations
@@ -17,7 +17,7 @@ import type React from "react"
 import type { Document } from "@/types"
 
 import { useState, useRef, useEffect } from "react"
-import { FileText, Upload, AlertCircle, CheckCircle } from "lucide-react"
+import { FileText, Upload, AlertCircle, CheckCircle, HelpCircle, Trash } from "lucide-react"
 import { DashboardCard } from "@/components/ui/dashboard-card"
 import { useDocuments } from "@/hooks/use-documents"
 import { formatFileSize, formatDate } from "@/utils/formatting"
@@ -29,7 +29,7 @@ interface DocumentWidgetProps {
 }
 
 export function DocumentWidget({ userId, limit = 5 }: DocumentWidgetProps) {
-  const { documents, isLoading, error, uploadDocument, refreshDocuments } = useDocuments(userId)
+  const { documents, isLoading, error, uploadDocument, refreshDocuments, deleteDocument } = useDocuments(userId)
   const [isUploading, setIsUploading] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [processingDocuments, setProcessingDocuments] = useState<Set<string>>(new Set())
@@ -118,11 +118,33 @@ export function DocumentWidget({ userId, limit = 5 }: DocumentWidgetProps) {
     const file = e.target.files?.[0]
     if (!file) return
 
+    // Validate file type
+    if (file.type !== "text/plain" && !file.name.endsWith(".txt")) {
+      setErrorMessage("Only .txt files are supported")
+      addToast("Only .txt files are supported", "error")
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ""
+      }
+      return
+    }
+
+    // Validate file size (max 10MB)
+    if (file.size > 10 * 1024 * 1024) {
+      setErrorMessage("File size must be less than 10MB")
+      addToast("File size must be less than 10MB", "error")
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ""
+      }
+      return
+    }
+
     try {
       setIsUploading(true)
       setErrorMessage(null)
 
-      const document = await uploadDocument(file)
+      const document = await uploadDocument(file, (progress) => {
+        console.log(`Upload progress: ${progress}%`)
+      })
 
       // Add validation here
       console.log("Document widget upload response:", document)
@@ -151,13 +173,30 @@ export function DocumentWidget({ userId, limit = 5 }: DocumentWidgetProps) {
   const getStatusIcon = (status: Document["status"]) => {
     switch (status) {
       case "indexed":
-        return <CheckCircle className="h-5 w-5 text-green-500" />
+        return <CheckCircle className="h-5 w-5 text-green-500" title="Indexed" />
       case "failed":
-        return <AlertCircle className="h-5 w-5 text-red-500" />
+        return <AlertCircle className="h-5 w-5 text-red-500" title="Failed" />
       case "processing":
-        return <div className="h-5 w-5 rounded-full border-2 border-blue-500 border-t-transparent animate-spin"></div>
+        return (
+          <div
+            className="h-5 w-5 rounded-full border-2 border-blue-500 border-t-transparent animate-spin"
+            title="Processing"
+          ></div>
+        )
       default:
-        return null
+        return <HelpCircle className="h-5 w-5 text-gray-500" title="Unknown status" />
+    }
+  }
+
+  const handleDeleteDocument = async (documentId: string) => {
+    try {
+      await deleteDocument(documentId)
+      addToast("Document deleted successfully", "success")
+      refreshDocuments()
+    } catch (error) {
+      console.error("Delete error:", error)
+      const message = error instanceof Error ? error.message : "Unknown error occurred"
+      addToast("Failed to delete document: " + message, "error")
     }
   }
 
@@ -193,13 +232,7 @@ export function DocumentWidget({ userId, limit = 5 }: DocumentWidgetProps) {
             </>
           )}
         </button>
-        <input
-          type="file"
-          ref={fileInputRef}
-          onChange={handleFileChange}
-          className="hidden"
-          accept=".pdf,.docx,.txt,.md"
-        />
+        <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept=".txt" />
 
         {processingDocuments.size > 0 && (
           <div className="bg-blue-50 border border-blue-200 text-blue-700 px-4 py-3 rounded-md">
@@ -226,7 +259,18 @@ export function DocumentWidget({ userId, limit = 5 }: DocumentWidgetProps) {
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center">{getStatusIcon(doc.status)}</div>
+                <div className="flex items-center space-x-2">
+                  {getStatusIcon(doc.status)}
+                  {doc.status !== "processing" && (
+                    <button
+                      onClick={() => handleDeleteDocument(doc.id)}
+                      className="text-red-500 hover:text-red-700"
+                      title="Delete document"
+                    >
+                      <Trash className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
               </li>
             ))}
           </ul>

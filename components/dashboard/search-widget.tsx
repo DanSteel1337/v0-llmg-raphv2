@@ -13,26 +13,26 @@
 
 import type React from "react"
 import { useState, useEffect } from "react"
-import { Search, Clock, AlertCircle, RefreshCw } from "lucide-react"
+import { Search, Clock, AlertCircle, RefreshCw, FileText } from "lucide-react"
 import { DashboardCard } from "@/components/ui/dashboard-card"
 import { useToast } from "@/components/toast"
 import { useSearch } from "@/hooks/use-search"
 
 interface SearchWidgetProps {
   userId: string
-  recentSearches?: string[]
 }
 
-export function SearchWidget({ userId, recentSearches = [] }: SearchWidgetProps) {
+export function SearchWidget({ userId }: SearchWidgetProps) {
   const [query, setQuery] = useState("")
   const [debouncedQuery, setDebouncedQuery] = useState("")
-  const { search, results, isLoading, error, setSearchOptions, searchOptions } = useSearch(userId)
+  const { search, results, isLoading, error, setSearchOptions, searchOptions, recentSearches } = useSearch(userId)
   const { addToast } = useToast()
   const [searchError, setSearchError] = useState<string | null>(null)
 
-  // Ensure results and recentSearches are always arrays
+  // Ensure results is always an array
   const safeResults = Array.isArray(results) ? results : []
-  const safeRecentSearches = Array.isArray(recentSearches) ? recentSearches : []
+  // Get the recent searches safely
+  const recentSearchItems = Array.isArray(recentSearches) ? recentSearches.slice(0, 3) : []
 
   // Debounce search query
   useEffect(() => {
@@ -88,9 +88,6 @@ export function SearchWidget({ userId, recentSearches = [] }: SearchWidgetProps)
     }
   }
 
-  // Get the recent searches safely
-  const recentSearchItems = safeRecentSearches.slice(0, 3)
-
   return (
     <DashboardCard title="Search" description="Search across your documents" isLoading={false}>
       <div className="space-y-4">
@@ -123,24 +120,30 @@ export function SearchWidget({ userId, recentSearches = [] }: SearchWidgetProps)
           <span className="text-gray-500">Search type:</span>
           <button
             onClick={() => handleSearchTypeChange("semantic")}
-            className={`${
-              searchOptions.type === "semantic" ? "text-blue-600 font-medium" : "text-gray-500 hover:text-gray-700"
+            className={`px-2 py-1 rounded-md ${
+              searchOptions.type === "semantic"
+                ? "bg-blue-100 text-blue-600 font-medium"
+                : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
             }`}
           >
             Semantic
           </button>
           <button
             onClick={() => handleSearchTypeChange("keyword")}
-            className={`${
-              searchOptions.type === "keyword" ? "text-blue-600 font-medium" : "text-gray-500 hover:text-gray-700"
+            className={`px-2 py-1 rounded-md ${
+              searchOptions.type === "keyword"
+                ? "bg-blue-100 text-blue-600 font-medium"
+                : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
             }`}
           >
             Keyword
           </button>
           <button
             onClick={() => handleSearchTypeChange("hybrid")}
-            className={`${
-              searchOptions.type === "hybrid" ? "text-blue-600 font-medium" : "text-gray-500 hover:text-gray-700"
+            className={`px-2 py-1 rounded-md ${
+              searchOptions.type === "hybrid"
+                ? "bg-blue-100 text-blue-600 font-medium"
+                : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
             }`}
           >
             Hybrid
@@ -169,7 +172,7 @@ export function SearchWidget({ userId, recentSearches = [] }: SearchWidgetProps)
           <div className="py-8">
             <div className="flex flex-col items-center justify-center">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mb-4"></div>
-              <p className="text-sm text-gray-500">Searching documents...</p>
+              <p className="text-sm text-gray-500">Searching documents using {searchOptions.type} search...</p>
             </div>
           </div>
         )}
@@ -178,15 +181,32 @@ export function SearchWidget({ userId, recentSearches = [] }: SearchWidgetProps)
         {!isLoading && debouncedQuery && safeResults.length > 0 && (
           <div className="space-y-4">
             <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wider">
-              {safeResults.length} {safeResults.length === 1 ? "Result" : "Results"}
+              {safeResults.length} {safeResults.length === 1 ? "Result" : "Results"} for "{debouncedQuery}"
             </h4>
             <ul className="space-y-3">
               {safeResults.map((result) => (
                 <li key={result.id} className="bg-white border border-gray-200 rounded-md p-3 hover:bg-gray-50">
                   <h5 className="text-sm font-medium text-gray-900 mb-1 truncate">{result.title}</h5>
-                  <p className="text-xs text-gray-500 mb-2">
-                    {result.documentName} • {result.date} • {Math.round(result.relevance * 100)}% match
-                  </p>
+                  <div className="flex items-center text-xs text-gray-500 mb-2">
+                    <span className="flex items-center">
+                      <FileText className="h-3 w-3 mr-1" />
+                      {result.documentName}
+                    </span>
+                    <span className="mx-2">•</span>
+                    <span>{result.date}</span>
+                    <span className="mx-2">•</span>
+                    <span
+                      className={`px-1.5 py-0.5 rounded-full ${
+                        result.relevance > 0.8
+                          ? "bg-green-100 text-green-800"
+                          : result.relevance > 0.5
+                            ? "bg-yellow-100 text-yellow-800"
+                            : "bg-gray-100 text-gray-800"
+                      }`}
+                    >
+                      {Math.round(result.relevance * 100)}% match
+                    </span>
+                  </div>
                   <div className="text-sm text-gray-700 line-clamp-2">{result.content}</div>
                   {result.highlights && Array.isArray(result.highlights) && result.highlights.length > 0 && (
                     <div className="mt-2 text-xs bg-yellow-50 p-2 rounded border border-yellow-100">
@@ -209,7 +229,7 @@ export function SearchWidget({ userId, recentSearches = [] }: SearchWidgetProps)
         )}
 
         {/* Recent searches */}
-        {!debouncedQuery && safeRecentSearches.length > 0 && (
+        {!debouncedQuery && recentSearchItems.length > 0 && (
           <div>
             <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">Recent Searches</h4>
             <ul className="space-y-1">
