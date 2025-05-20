@@ -5,14 +5,16 @@
  *
  * Dependencies:
  * - @/lib/embedding-service.ts for embeddings
- * - @/lib/api-utils for API response handling
+ * - @/utils/apiRequest for standardized API responses
+ * - @/utils/errorHandling for error handling
  */
 
 import type { NextRequest } from "next/server"
 import { generateEmbedding } from "@/lib/embedding-service"
 import { EMBEDDING_MODEL, VECTOR_DIMENSION } from "@/lib/embedding-config"
-import { handleApiRequest } from "@/lib/api-utils"
-import { withErrorHandling } from "@/lib/error-handler"
+import { handleApiRequest } from "@/utils/apiRequest"
+import { withErrorHandling } from "@/utils/errorHandling"
+import { logger } from "@/lib/utils/logger"
 
 export const runtime = "edge"
 
@@ -22,14 +24,14 @@ export const POST = withErrorHandling(async (request: NextRequest) => {
       const { text } = await request.json()
 
       if (!text) {
-        throw new Error("[EmbeddingsAPI] Text is required")
+        throw new Error("Text is required")
       }
 
       if (text.trim() === "") {
-        throw new Error("[EmbeddingsAPI] Cannot generate embedding for empty or whitespace-only text")
+        throw new Error("Cannot generate embedding for empty or whitespace-only text")
       }
 
-      console.log(`[EmbeddingsAPI] Generating embedding`, {
+      logger.info(`Generating embedding`, {
         textLength: text.length,
         model: EMBEDDING_MODEL,
         expectedDimension: VECTOR_DIMENSION,
@@ -39,21 +41,19 @@ export const POST = withErrorHandling(async (request: NextRequest) => {
 
       // Double-check that embedding dimensions match expected
       if (embedding.length !== VECTOR_DIMENSION) {
-        throw new Error(
-          `[EmbeddingsAPI] Embedding dimension mismatch: Expected ${VECTOR_DIMENSION}, got ${embedding.length}`,
-        )
+        throw new Error(`Embedding dimension mismatch: Expected ${VECTOR_DIMENSION}, got ${embedding.length}`)
       }
 
       // Double-check that embedding is not all zeros
       if (embedding.every((v) => v === 0)) {
-        console.error("[EmbeddingsAPI] Generated an all-zero embedding", {
+        logger.error(`Generated an all-zero embedding`, {
           textSample: text.substring(0, 100) + "...",
           textLength: text.length,
         })
-        throw new Error("[EmbeddingsAPI] Invalid embedding generated: vector contains only zeros")
+        throw new Error("Invalid embedding generated: vector contains only zeros")
       }
 
-      console.log(`[EmbeddingsAPI] Successfully generated embedding`, {
+      logger.info(`Successfully generated embedding`, {
         dimensions: embedding.length,
       })
 
@@ -63,11 +63,11 @@ export const POST = withErrorHandling(async (request: NextRequest) => {
         dimensions: embedding.length,
       }
     } catch (error) {
-      console.error("[EmbeddingsAPI] Error generating embedding", {
+      logger.error("Error generating embedding", {
         error: error instanceof Error ? error.message : "Unknown error",
         stack: error instanceof Error ? error.stack : undefined,
       })
       throw error
     }
-  })
+  }, request)
 })

@@ -1,58 +1,57 @@
 /**
- * API Request Handler
+ * API Request Utilities
  *
- * Provides standardized request handling for API routes.
- * This utility is Edge-compatible and works with Vercel's serverless environment.
- *
- * Dependencies:
- * - next/server for NextResponse
- * - @/lib/utils/logger for logging
+ * Provides consistent request handling for API routes.
  */
 
 import { NextResponse } from "next/server"
+import type { NextRequest } from "next/server"
 import { logger } from "@/lib/utils/logger"
 
 /**
- * Handles API requests with consistent response formatting
- * @param handler - Async function that processes the request
- * @param req - The incoming request (optional)
- * @returns Formatted API response
+ * Handle API request with consistent response format
  */
-export const handleApiRequest = async (handler: () => Promise<any>, req?: Request): Promise<Response> => {
+export async function handleApiRequest<T>(handler: () => Promise<T>, request?: NextRequest): Promise<NextResponse> {
   try {
-    const method = req?.method || "UNKNOWN"
-    const url = req ? new URL(req.url) : { pathname: "UNKNOWN" }
-
-    logger.info(`API Request: ${method} ${url.pathname}`)
-
     const result = await handler()
 
-    // If result is already a Response, return it directly
-    if (result instanceof Response) {
-      return result
+    // Log successful request if request object is provided
+    if (request) {
+      logger.info(`API request successful`, {
+        path: request.nextUrl.pathname,
+        method: request.method,
+      })
     }
 
-    return NextResponse.json({
-      success: true,
-      data: result,
-    })
-  } catch (error) {
-    logger.error("API request error:", {
-      error: error instanceof Error ? error.message : String(error),
-      path: req ? new URL(req.url).pathname : "UNKNOWN",
-    })
+    // Ensure we always return a valid JSON object
+    if (result === undefined || result === null) {
+      return NextResponse.json({ success: true })
+    }
 
-    const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred"
-    const statusCode = error instanceof Error && "statusCode" in error ? (error as any).statusCode : 500
+    return NextResponse.json(result)
+  } catch (error) {
+    // Log error if request object is provided
+    if (request) {
+      logger.error(`API request failed`, {
+        path: request.nextUrl.pathname,
+        method: request.method,
+        error: error instanceof Error ? error.message : "Unknown error",
+      })
+    }
 
     return NextResponse.json(
-      {
-        success: false,
-        error: errorMessage,
-      },
-      {
-        status: statusCode,
-      },
+      { success: false, error: error instanceof Error ? error.message : "Unknown error" },
+      { status: 400 },
     )
+  }
+}
+
+/**
+ * Validate required fields in request body
+ */
+export function validateRequiredFields(body: any, fields: string[], context = "Request"): void {
+  const missingFields = fields.filter((field) => !body[field])
+  if (missingFields.length > 0) {
+    throw new Error(`${context}: Missing required fields: ${missingFields.join(", ")}`)
   }
 }

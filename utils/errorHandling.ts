@@ -1,46 +1,46 @@
 /**
- * Error Handling Utility
+ * Error Handling Utilities
  *
- * Provides standardized error handling for API routes.
- * This utility is Edge-compatible and works with Vercel's serverless environment.
- *
- * Dependencies:
- * - next/server for NextResponse
- * - @/lib/utils/logger for logging
+ * Provides consistent error handling for API routes.
  */
 
 import { NextResponse } from "next/server"
+import type { NextRequest } from "next/server"
 import { logger } from "@/lib/utils/logger"
 
-export type ApiHandler = (req: Request) => Promise<Response>
+/**
+ * ValidationError class for handling validation errors
+ */
+export class ValidationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "ValidationError"
+  }
+}
 
 /**
- * Higher-order function that wraps API handlers with consistent error handling
- * @param handler - The API handler function to wrap
- * @returns A wrapped handler with error handling
+ * Wrap an API handler with standardized error handling
  */
-export const withErrorHandling = (handler: ApiHandler) => {
-  return async (req: Request) => {
+export function withErrorHandling(handler: (request: NextRequest) => Promise<NextResponse>) {
+  return async (request: NextRequest): Promise<NextResponse> => {
     try {
-      return await handler(req)
+      return await handler(request)
     } catch (error) {
       logger.error("API error:", {
-        error: error instanceof Error ? error.message : String(error),
-        url: req.url,
-        method: req.method,
+        path: request.nextUrl.pathname,
+        error: error instanceof Error ? error.message : "Unknown error",
+        stack: error instanceof Error ? error.stack : undefined,
       })
 
-      const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred"
-      const statusCode = error instanceof Error && "statusCode" in error ? (error as any).statusCode : 500
+      // Handle validation errors with 400 status
+      if (error instanceof ValidationError) {
+        return NextResponse.json({ success: false, error: error.message }, { status: 400 })
+      }
 
+      // Handle other errors with 500 status
       return NextResponse.json(
-        {
-          success: false,
-          error: errorMessage,
-        },
-        {
-          status: statusCode,
-        },
+        { success: false, error: error instanceof Error ? error.message : "Internal server error" },
+        { status: 500 },
       )
     }
   }
