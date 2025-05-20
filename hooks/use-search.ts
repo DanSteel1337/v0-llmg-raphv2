@@ -1,98 +1,73 @@
 /**
  * Search Hook
  *
- * Custom hook for performing searches and managing search results.
+ * React hook for performing vector searches.
+ * Provides functionality for searching documents and managing search results.
  *
  * Dependencies:
- * - @/hooks/use-api for API interaction
+ * - @/services/client-api-service for API interactions
  * - @/types for search types
  */
 
 "use client"
 
-import { useState, useCallback, useEffect } from "react"
-import { useApi } from "@/hooks/use-api"
+import { useState, useCallback } from "react"
+import { useAuth } from "./use-auth"
 import { performSearch } from "@/services/client-api-service"
 import type { SearchResult, SearchOptions } from "@/types"
 
-export function useSearch(userId: string) {
-  const [searchOptions, setSearchOptions] = useState<SearchOptions>({
-    type: "semantic",
-  })
-  const [recentSearches, setRecentSearches] = useState<string[]>([])
+export function useSearch() {
+  const { user } = useAuth()
+  const [results, setResults] = useState<SearchResult[]>([])
+  const [isSearching, setIsSearching] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [lastQuery, setLastQuery] = useState<string>("")
 
-  // Wrap the search function with useCallback
-  const searchCallback = useCallback(
-    (query: string) => {
-      return performSearch(userId, query, searchOptions)
+  // Perform a search
+  const search = useCallback(
+    async (query: string, options?: SearchOptions) => {
+      if (!user?.id) {
+        throw new Error("User not authenticated")
+      }
+
+      if (!query.trim()) {
+        setResults([])
+        setLastQuery("")
+        return []
+      }
+
+      try {
+        setIsSearching(true)
+        setError(null)
+        setLastQuery(query)
+
+        const searchResults = await performSearch(user.id, query, options)
+        setResults(searchResults)
+        return searchResults
+      } catch (err) {
+        console.error("Error performing search:", err)
+        setError(err instanceof Error ? err.message : "Search failed")
+        return []
+      } finally {
+        setIsSearching(false)
+      }
     },
-    [userId, searchOptions],
+    [user?.id],
   )
 
-  const { data: results, isLoading, error, execute: executeSearch } = useApi<SearchResult[], [string]>(searchCallback)
-
-  // Load recent searches on mount
-  useEffect(() => {
-    setRecentSearches(getRecentSearches())
+  // Clear search results
+  const clearResults = useCallback(() => {
+    setResults([])
+    setLastQuery("")
+    setError(null)
   }, [])
 
-  // Save search to local storage
-  const saveSearchToHistory = (query: string) => {
-    if (typeof window !== "undefined") {
-      const searches = getRecentSearches()
-      if (!searches.includes(query)) {
-        searches.unshift(query)
-        if (searches.length > 5) searches.pop()
-        localStorage.setItem("recentSearches", JSON.stringify(searches))
-        setRecentSearches(searches)
-      }
-    }
-  }
-
-  const search = async (query: string) => {
-    if (!query || typeof query !== "string") {
-      throw new Error("Search query cannot be empty")
-    }
-
-    const trimmedQuery = query.trim()
-    if (!trimmedQuery) {
-      return []
-    }
-
-    if (trimmedQuery.length < 2) {
-      throw new Error("Search query must be at least 2 characters")
-    }
-
-    try {
-      const results = await executeSearch(trimmedQuery)
-      saveSearchToHistory(trimmedQuery)
-      return results
-    } catch (error) {
-      console.error("Search error:", error)
-      throw error
-    }
-  }
-
-  // Get recent searches from local storage
-  const getRecentSearches = (): string[] => {
-    if (typeof window === "undefined") return []
-
-    try {
-      const searches = JSON.parse(localStorage.getItem("recentSearches") || "[]")
-      return Array.isArray(searches) ? searches : []
-    } catch (error) {
-      console.error("Error parsing recent searches:", error)
-      return []
-    }
-  }
-
   return {
-    results: results || [],
-    isLoading,
+    results,
+    isSearching,
     error,
+    lastQuery,
     search,
-    setSearchOptions,
-    searchOptions,
-    recentSearches,
+    clearResults,
   }
 }

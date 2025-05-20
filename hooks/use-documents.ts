@@ -77,12 +77,14 @@ export function useDocuments() {
       }
 
       try {
-        await deleteDocument(documentId)
+        const success = await deleteDocument(documentId)
 
-        // Remove the deleted document from the state
-        setDocuments((prevDocs) => prevDocs.filter((doc) => doc.id !== documentId))
+        if (success) {
+          // Remove the deleted document from the state
+          setDocuments((prevDocs) => prevDocs.filter((doc) => doc.id !== documentId))
+        }
 
-        return true
+        return success
       } catch (err) {
         console.error("Error deleting document:", err)
         throw err
@@ -99,18 +101,20 @@ export function useDocuments() {
       }
 
       try {
-        await retryDocumentProcessing(documentId)
+        const success = await retryDocumentProcessing(documentId)
 
-        // Update the document status in the state
-        setDocuments((prevDocs) =>
-          prevDocs.map((doc) =>
-            doc.id === documentId
-              ? { ...doc, status: "processing", processing_progress: 0, error_message: undefined }
-              : doc,
-          ),
-        )
+        if (success) {
+          // Update the document status in the state
+          setDocuments((prevDocs) =>
+            prevDocs.map((doc) =>
+              doc.id === documentId
+                ? { ...doc, status: "processing", processing_progress: 0, error_message: undefined }
+                : doc,
+            ),
+          )
+        }
 
-        return true
+        return success
       } catch (err) {
         console.error("Error retrying document processing:", err)
         throw err
