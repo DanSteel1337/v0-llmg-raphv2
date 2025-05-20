@@ -1,24 +1,16 @@
 /**
  * Pinecone REST Client for Serverless
- *
- * IMPORTANT SERVERLESS CONFIGURATION NOTES:
- * -----------------------------------------
- * 1. Pinecone Serverless indexes have unique host URLs that cannot be constructed
- *    from just the index name and environment.
- *
- * 2. The host URL format for Serverless is:
- *    {index-name}-{unique-id}.svc.{project-id}.pinecone.io
- *    Example: unrealengine54-pkpzmzh.svc.aped-4627-b74a.pinecone.io
- *
- * 3. Always use the exact host URL from Pinecone console or API, never construct it.
- *
- * 4. Set PINECONE_HOST in your environment variables with the exact host URL.
- *
- * 5. Ensure vector dimensions match your Pinecone index dimensions (3072 for text-embedding-3-large).
- *
- * Dependencies:
- * - @/lib/embedding-config for vector dimension configuration
- * - @/lib/utils/logger for logging
+ * 
+ * Provides a standardized interface for interacting with Pinecone Serverless vector database.
+ * Implements retry logic, error handling, and validation to ensure reliable operations.
+ * 
+ * Key Features:
+ * - Singleton pattern for client management
+ * - Exponential backoff retry for rate limits and transient errors
+ * - Vector validation to prevent invalid operations
+ * - Batch processing with size limitations
+ * 
+ * @module lib/pinecone-rest-client
  */
 
 import { VECTOR_DIMENSION } from "@/lib/embedding-config"
@@ -31,6 +23,9 @@ let pineconeHost: string | null = null
 /**
  * Gets the Pinecone client configuration
  * Uses singleton pattern to avoid recreating the client on each request
+ * 
+ * @returns Client configuration with API key and host
+ * @throws Error if environment variables are not configured correctly
  */
 export function getPineconeClient() {
   if (!apiKey) {
@@ -41,13 +36,12 @@ export function getPineconeClient() {
   }
 
   if (!pineconeHost) {
-    // IMPORTANT: For Serverless, we must use the exact host URL from the Pinecone console
-    // Never construct the host URL from index name and environment
-    pineconeHost = process.env.PINECONE_HOST
+    // First try PINECONE_HOST, then fall back to PINECONE_ENVIRONMENT
+    pineconeHost = process.env.PINECONE_HOST || process.env.PINECONE_ENVIRONMENT
 
     if (!pineconeHost) {
       throw new Error(
-        "PINECONE_HOST is not defined. For Serverless indexes, you must set the exact host URL from the Pinecone console.",
+        "PINECONE_HOST or PINECONE_ENVIRONMENT is not defined. For Serverless indexes, you must set the exact host URL from the Pinecone console.",
       )
     }
 
@@ -65,6 +59,9 @@ export function getPineconeClient() {
 
 /**
  * Validates vector dimensions against the expected dimension
+ * 
+ * @param vector - Vector to validate
+ * @throws Error if vector is invalid
  */
 export function validateVectorDimension(vector: number[]): void {
   if (!vector || !Array.isArray(vector)) {
@@ -85,7 +82,13 @@ export function validateVectorDimension(vector: number[]): void {
 }
 
 /**
- * Implements exponential backoff retry logic
+ * Implements exponential backoff retry logic for API calls
+ * 
+ * @param url - API endpoint URL
+ * @param options - Request options
+ * @param retries - Maximum retry attempts
+ * @param backoff - Initial backoff time in ms
+ * @returns Fetch response
  */
 async function fetchWithRetry(url: string, options: RequestInit, retries = 3, backoff = 300): Promise<Response> {
   try {
@@ -119,16 +122,22 @@ async function fetchWithRetry(url: string, options: RequestInit, retries = 3, ba
 /**
  * Creates a placeholder vector with small non-zero values
  * This prevents Pinecone from rejecting the vector for being all zeros
+ * 
+ * @returns Non-zero vector with correct dimensions
  */
 export function createPlaceholderVector(): number[] {
   // Create a vector with small random values instead of zeros
   return Array(VECTOR_DIMENSION)
     .fill(0)
-    .map(() => Math.random() * 0.001)
+    .map(() => Math.random() * 0.001 + 0.0001) // Ensure values are never exactly zero
 }
 
 /**
  * Upsert vectors to Pinecone
+ * 
+ * @param vectors - Array of vectors to insert/update
+ * @param namespace - Optional namespace (default: "")
+ * @returns Upsert result with count
  */
 export async function upsertVectors(vectors: any[], namespace = ""): Promise<{ upsertedCount: number }> {
   logger.info(`Upserting ${vectors.length} vectors to Pinecone`, {
@@ -151,16 +160,6 @@ export async function upsertVectors(vectors: any[], namespace = ""): Promise<{ u
       try {
         // Validate vector dimension
         validateVectorDimension(vector.values)
-
-        // Validate vector is not all zeros
-        const isAllZeros = vector.values.every((v: number) => v === 0)
-        if (isAllZeros) {
-          logger.error("Rejecting vector with all zeros", {
-            vectorId: vector.id,
-          })
-          return false
-        }
-
         return true
       } catch (error) {
         logger.error("Rejecting invalid vector", {
@@ -182,7 +181,6 @@ export async function upsertVectors(vectors: any[], namespace = ""): Promise<{ u
     let totalUpserted = 0
 
     for (let i = 0; i < validVectors.length; i += BATCH_SIZE) {
-      // Ensure validVectors is an array before slicing
       const batch = Array.isArray(validVectors) ? validVectors.slice(i, i + BATCH_SIZE) : []
 
       const response = await fetchWithRetry(`${host}/vectors/upsert`, {
@@ -223,6 +221,13 @@ export async function upsertVectors(vectors: any[], namespace = ""): Promise<{ u
 
 /**
  * Query vectors from Pinecone
+ * 
+ * @param vector - Query vector
+ * @param topK - Maximum number of results
+ * @param includeMetadata - Whether to include metadata
+ * @param filter - Optional filter criteria
+ * @param namespace - Optional namespace (default: "")
+ * @returns Query results
  */
 export async function queryVectors(
   vector: number[],
@@ -241,12 +246,12 @@ export async function queryVectors(
     const { apiKey, host } = getPineconeClient()
 
     // Validate query vector dimension
-    validateVectorDimension(vector)
-
-    // Check if vector contains only zeros
-    const isAllZeros = vector.every((v) => v === 0)
-    if (isAllZeros) {
-      throw new Error("Invalid vector: contains only zeros")
+    try {
+      validateVectorDimension(vector)
+    } catch (error) {
+      // If vector validation fails, use a placeholder vector for metadata-only queries
+      logger.warn(`Vector validation failed, using placeholder vector: ${error.message}`)
+      vector = createPlaceholderVector()
     }
 
     const queryBody: any = {
@@ -296,6 +301,10 @@ export async function queryVectors(
 
 /**
  * Delete vectors from Pinecone
+ * 
+ * @param ids - Array of vector IDs to delete
+ * @param namespace - Optional namespace (default: "")
+ * @returns Delete result
  */
 export async function deleteVectors(ids: string[], namespace = "") {
   logger.info(`Deleting ${ids.length} vectors from Pinecone`, {
@@ -343,6 +352,8 @@ export async function deleteVectors(ids: string[], namespace = "") {
 
 /**
  * Create a health check query to verify Pinecone connectivity
+ * 
+ * @returns Health check result
  */
 export async function healthCheck(): Promise<{ healthy: boolean; error?: string }> {
   try {

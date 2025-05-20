@@ -2,10 +2,21 @@
  * Chat Hook
  *
  * Custom hook for managing chat conversations and messages.
+ * Provides functionality for loading conversations, managing messages,
+ * and handling the conversation lifecycle.
  *
+ * Features:
+ * - Conversation creation and management
+ * - Message sending and retrieval
+ * - State tracking for loading and typing indicators
+ * - Error handling and reporting
+ * 
  * Dependencies:
- * - @/hooks/use-api for API interaction
- * - @/types for chat types
+ * - @/hooks/use-api for standardized API interactions
+ * - @/services/client-api-service for backend communication
+ * - @/types for type definitions
+ *
+ * @module hooks/use-chat
  */
 
 "use client"
@@ -20,21 +31,36 @@ import {
 } from "@/services/client-api-service"
 import type { ChatMessage, Conversation } from "@/types"
 
-export function useChat(userId: string, conversationId?: string) {
-  const [activeConversationId, setActiveConversationId] = useState<string | undefined>(conversationId)
+export function useChat(userId: string, initialConversationId?: string) {
+  const [activeConversationId, setActiveConversationId] = useState<string | undefined>(initialConversationId)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isTyping, setIsTyping] = useState(false)
+  const [retryCount, setRetryCount] = useState(0)
 
-  // Wrap the fetchMessages call with useCallback
+  // Ensure userId is valid before making any requests
+  const safeUserId = userId || ""
+
+  // Wrap the fetchMessages call with useCallback and proper validation
   const fetchMessagesCallback = useCallback(() => {
-    if (!activeConversationId) return Promise.resolve([])
+    if (!activeConversationId) {
+      console.log("No active conversation, skipping fetchMessages")
+      return Promise.resolve([])
+    }
+    
+    console.log(`Fetching messages for conversation: ${activeConversationId}`)
     return fetchMessages(activeConversationId)
   }, [activeConversationId])
 
-  // Wrap the fetchConversations call with useCallback
+  // Wrap the fetchConversations call with useCallback and proper validation
   const fetchConversationsCallback = useCallback(() => {
-    return fetchConversations(userId)
-  }, [userId])
+    if (!safeUserId) {
+      console.log("No userId provided, skipping fetchConversations")
+      return Promise.resolve([])
+    }
+    
+    console.log(`Fetching conversations for user: ${safeUserId}`)
+    return fetchConversations(safeUserId)
+  }, [safeUserId])
 
   // Fetch messages for the active conversation
   const {
@@ -52,28 +78,69 @@ export function useChat(userId: string, conversationId?: string) {
     execute: loadConversations,
   } = useApi<Conversation[], []>(fetchConversationsCallback)
 
-  // Create a new conversation
+  // Create a new conversation with proper error handling
   const createConversation = async (title: string) => {
-    const conversation = await apiCreateConversation(userId, title)
-    setActiveConversationId(conversation.id)
-    await loadConversations()
-    return conversation
+    if (!safeUserId) {
+      throw new Error("User ID is required to create a conversation")
+    }
+
+    try {
+      console.log(`Creating conversation with title: ${title}`)
+      const conversation = await apiCreateConversation(safeUserId, title)
+      
+      if (!conversation?.id) {
+        throw new Error("Failed to create conversation: No conversation ID returned")
+      }
+
+      console.log(`Conversation created with ID: ${conversation.id}`)
+      setActiveConversationId(conversation.id)
+      await loadConversations()
+      return conversation
+    } catch (error) {
+      console.error(`Error creating conversation:`, error)
+      throw error
+    }
   }
 
-  // Send a message
+  // Send a message with validation and error handling
   const sendMessage = async (content: string) => {
     if (!activeConversationId) {
+      console.error("Cannot send message: No active conversation")
       throw new Error("No active conversation")
+    }
+
+    if (!safeUserId) {
+      console.error("Cannot send message: No user ID")
+      throw new Error("User ID is required to send a message")
+    }
+
+    if (!content || content.trim() === "") {
+      console.error("Cannot send message: Empty content")
+      throw new Error("Message content cannot be empty")
     }
 
     setIsTyping(true)
 
     try {
-      await apiSendMessage(activeConversationId, content, userId)
+      console.log(`Sending message to conversation: ${activeConversationId}`)
+      await apiSendMessage(activeConversationId, content, safeUserId)
+      
+      // Reload messages to get the new message and response
       await loadMessages()
+      setRetryCount(0) // Reset retry count on success
       return true
     } catch (error) {
       console.error("Error sending message:", error)
+      
+      // Implement retry logic for transient errors
+      if (retryCount < 2) {
+        console.log(`Retrying send message (${retryCount + 1}/2)...`)
+        setRetryCount(prev => prev + 1)
+        // Wait briefly before retrying
+        await new Promise(resolve => setTimeout(resolve, 1000))
+        return sendMessage(content)
+      }
+      
       throw error
     } finally {
       setIsTyping(false)
@@ -83,8 +150,10 @@ export function useChat(userId: string, conversationId?: string) {
   // Load messages when the active conversation changes
   useEffect(() => {
     if (activeConversationId) {
+      console.log(`Active conversation changed to: ${activeConversationId}, loading messages`)
       loadMessages()
     } else {
+      console.log("No active conversation, clearing messages")
       setMessages([])
     }
   }, [activeConversationId, loadMessages])
@@ -92,14 +161,18 @@ export function useChat(userId: string, conversationId?: string) {
   // Update messages when fetched messages change
   useEffect(() => {
     if (fetchedMessages) {
+      console.log(`Received ${fetchedMessages.length} messages from API`)
       setMessages(fetchedMessages)
     }
   }, [fetchedMessages])
 
-  // Load conversations on mount
+  // Load conversations on mount or when userId changes
   useEffect(() => {
-    loadConversations()
-  }, [loadConversations])
+    if (safeUserId) {
+      console.log(`Loading conversations for user: ${safeUserId}`)
+      loadConversations()
+    }
+  }, [safeUserId, loadConversations])
 
   return {
     messages,

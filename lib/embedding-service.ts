@@ -1,23 +1,39 @@
 /**
  * Embedding Service
  *
- * Handles generation of embeddings for text using OpenAI's embedding models.
- * Provides utilities for embedding generation, validation, and error handling.
+ * Handles the generation of embeddings using OpenAI's text-embedding-3-large model.
+ * Provides utilities for embedding generation with proper error handling and validation.
+ * 
+ * Features:
+ * - Consistent vector dimensions (3072 for text-embedding-3-large)
+ * - Error handling and retries for API calls
+ * - Vector validation to ensure quality
+ * - Support for batch processing
+ * 
+ * Dependencies:
+ * - OpenAI API for embedding generation
+ * - @/lib/utils/logger for structured logging
+ * 
+ * @module lib/embedding-service
  */
 
 import { logger } from "@/lib/utils/logger"
+import { VECTOR_DIMENSION, EMBEDDING_MODEL } from "@/lib/embedding-config"
 
-// Constants for embedding configuration
-const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL || "text-embedding-3-large"
-const EMBEDDING_DIMENSIONS = 3072 // Dimensions for text-embedding-3-large
+// Maximum retries for API calls
+const MAX_RETRIES = 3
+
+// Maximum text length for embedding
+const MAX_TEXT_LENGTH = 25000
 
 /**
  * Generate an embedding for a text string
  *
- * @param text Text to generate embedding for
+ * @param text - Text to generate embedding for
+ * @param retryCount - Current retry attempt (for internal use)
  * @returns Vector embedding as number array
  */
-export async function generateEmbedding(text: string): Promise<number[]> {
+export async function generateEmbedding(text: string, retryCount = 0): Promise<number[]> {
   if (!text || typeof text !== "string") {
     throw new Error("Invalid text provided for embedding generation")
   }
@@ -30,9 +46,12 @@ export async function generateEmbedding(text: string): Promise<number[]> {
 
     // Truncate text if it's too long (OpenAI has token limits)
     // text-embedding-3-large has an 8191 token limit
-    const truncatedText = text.length > 25000 ? text.slice(0, 25000) : text
+    const truncatedText = text.length > MAX_TEXT_LENGTH ? text.slice(0, MAX_TEXT_LENGTH) : text
 
-    logger.info(`Generating embedding with model ${EMBEDDING_MODEL}`)
+    logger.info(`Generating embedding with model ${EMBEDDING_MODEL}`, {
+      textLength: truncatedText.length,
+      modelName: EMBEDDING_MODEL
+    })
 
     const response = await fetch("https://api.openai.com/v1/embeddings", {
       method: "POST",
@@ -43,12 +62,31 @@ export async function generateEmbedding(text: string): Promise<number[]> {
       body: JSON.stringify({
         model: EMBEDDING_MODEL,
         input: truncatedText,
+        dimensions: VECTOR_DIMENSION, // Explicitly specify dimensions
       }),
     })
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}))
-      logger.error(`OpenAI API error: ${response.status} ${response.statusText}`, { errorData })
+      
+      // Handle rate limiting with retries
+      if ((response.status === 429 || response.status === 503) && retryCount < MAX_RETRIES) {
+        const retryAfter = response.headers.get('Retry-After') 
+        const delayMs = retryAfter ? parseInt(retryAfter, 10) * 1000 : Math.pow(2, retryCount) * 1000
+        
+        logger.warn(`OpenAI API rate limited. Retrying in ${delayMs}ms. Attempt ${retryCount + 1}/${MAX_RETRIES}`, {
+          status: response.status,
+          retryAfter
+        })
+        
+        await new Promise(resolve => setTimeout(resolve, delayMs))
+        return generateEmbedding(text, retryCount + 1)
+      }
+      
+      logger.error(`OpenAI API error: ${response.status} ${response.statusText}`, { 
+        errorData,
+        textLength: truncatedText.length
+      })
       throw new Error(`OpenAI API error: ${response.status} ${response.statusText}`)
     }
 
@@ -58,30 +96,53 @@ export async function generateEmbedding(text: string): Promise<number[]> {
     const embedding = result.data?.[0]?.embedding
 
     if (!embedding || !Array.isArray(embedding)) {
-      logger.error("Invalid embedding response from OpenAI", { result })
+      logger.error("Invalid embedding response from OpenAI", { 
+        result: JSON.stringify(result).substring(0, 200) + "..." 
+      })
       throw new Error("Invalid embedding response from OpenAI")
     }
 
-    if (embedding.length !== EMBEDDING_DIMENSIONS) {
-      logger.error(`Embedding dimension mismatch: expected ${EMBEDDING_DIMENSIONS}, got ${embedding.length}`, {
+    if (embedding.length !== VECTOR_DIMENSION) {
+      logger.error(`Embedding dimension mismatch: expected ${VECTOR_DIMENSION}, got ${embedding.length}`, {
         model: EMBEDDING_MODEL,
       })
-      throw new Error(`Embedding dimension mismatch: expected ${EMBEDDING_DIMENSIONS}, got ${embedding.length}`)
+      throw new Error(`Embedding dimension mismatch: expected ${VECTOR_DIMENSION}, got ${embedding.length}`)
     }
 
     // Check for zero vectors (indicates potential issues)
     const isZeroVector = embedding.every((val) => Math.abs(val) < 1e-6)
     if (isZeroVector) {
-      logger.error("Zero vector detected in embedding result", { text: text.slice(0, 100) })
+      logger.error("Zero vector detected in embedding result", { 
+        textSample: text.substring(0, 100) + "...",
+        textLength: text.length 
+      })
       throw new Error("Zero vector detected in embedding result")
     }
 
     return embedding
   } catch (error) {
-    logger.error("Error generating embedding", {
-      error: error instanceof Error ? error.message : "Unknown error",
-      textLength: text.length,
-    })
+    // If we've already retried MAX_RETRIES times, give up
+    if (retryCount >= MAX_RETRIES) {
+      logger.error("Error generating embedding after max retries", {
+        error: error instanceof Error ? error.message : "Unknown error",
+        textLength: text.length,
+        retries: retryCount
+      })
+      throw error
+    }
+    
+    // For unexpected errors, retry with exponential backoff
+    if (!(error instanceof Error && error.message.includes("dimension mismatch"))) {
+      const delayMs = Math.pow(2, retryCount) * 1000
+      
+      logger.warn(`Unexpected error in embedding generation. Retrying in ${delayMs}ms. Attempt ${retryCount + 1}/${MAX_RETRIES}`, {
+        error: error instanceof Error ? error.message : "Unknown error"
+      })
+      
+      await new Promise(resolve => setTimeout(resolve, delayMs))
+      return generateEmbedding(text, retryCount + 1)
+    }
+    
     throw error
   }
 }
@@ -89,7 +150,7 @@ export async function generateEmbedding(text: string): Promise<number[]> {
 /**
  * Generate embeddings for multiple texts
  *
- * @param texts Array of texts to generate embeddings for
+ * @param texts - Array of texts to generate embeddings for
  * @returns Array of vector embeddings
  */
 export async function generateEmbeddings(texts: string[]): Promise<number[][]> {
@@ -100,23 +161,45 @@ export async function generateEmbeddings(texts: string[]): Promise<number[][]> {
   // Process in batches to avoid rate limits
   const BATCH_SIZE = 10
   const embeddings: number[][] = []
+  let failures = 0
 
   for (let i = 0; i < texts.length; i += BATCH_SIZE) {
     const batch = texts.slice(i, i + BATCH_SIZE)
+    logger.info(`Processing embedding batch ${Math.floor(i/BATCH_SIZE) + 1}/${Math.ceil(texts.length/BATCH_SIZE)}`, {
+      batchSize: batch.length
+    })
 
     // Process each text in the batch
-    const batchPromises = batch.map((text) => generateEmbedding(text))
+    const batchPromises = batch.map((text) => generateEmbedding(text).catch(error => {
+      logger.error(`Error generating embedding for batch item`, {
+        error: error instanceof Error ? error.message : "Unknown error",
+        textSample: text.substring(0, 100) + "..."
+      })
+      failures++
+      // Return null for failed embeddings
+      return null
+    }))
 
     try {
       const batchEmbeddings = await Promise.all(batchPromises)
-      embeddings.push(...batchEmbeddings)
+      // Filter out null values (failed embeddings)
+      embeddings.push(...batchEmbeddings.filter(embedding => embedding !== null))
     } catch (error) {
       logger.error(`Error generating embeddings for batch ${i / BATCH_SIZE + 1}`, {
         error: error instanceof Error ? error.message : "Unknown error",
       })
-      throw error
+      // Continue with next batch even if this one failed
     }
   }
+
+  if (embeddings.length === 0 && failures > 0) {
+    throw new Error(`Failed to generate any valid embeddings. All ${failures} attempts failed.`)
+  }
+
+  logger.info(`Completed embedding generation for ${texts.length} texts`, {
+    successCount: embeddings.length,
+    failureCount: failures
+  })
 
   return embeddings
 }
