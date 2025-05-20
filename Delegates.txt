@@ -1,0 +1,172 @@
+# 🎯 Unreal Engine 5.4 C++ Delegates Overview
+
+## 🧩 What are Delegates?
+
+**Delegates** are data types that reference and execute member functions on C++ Objects in a **generic**, **type-safe** way.
+
+- Delegates can dynamically bind to a member function of an object — even without knowing the object’s type ahead of time.
+- Delegates are **safe to copy** (but it's recommended to pass them **by reference** because copying allocates heap memory).
+  
+Unreal Engine supports **three types** of delegates:
+
+| Type        | Description                                |
+|:------------|:-------------------------------------------|
+| Single      | Points to a single function               |
+| Multicast   | Points to multiple functions               |
+| Dynamic     | Can be serialized with `UObject` system (Blueprint friendly) |
+
+---
+
+## 🛠 Declaring Delegates
+
+Use the correct `DECLARE_*` macro based on the function signature you need.
+
+| Function Signature          | Macro                                  |
+|:-----------------------------|:--------------------------------------|
+| `void Function()`            | `DECLARE_DELEGATE(DelegateName)` |
+| `void Function(Param1)`       | `DECLARE_DELEGATE_OneParam(DelegateName, Param1Type)` |
+| `void Function(Param1, Param2)` | `DECLARE_DELEGATE_TwoParams(DelegateName, Param1Type, Param2Type)` |
+| `RetValType Function()`       | `DECLARE_DELEGATE_RetVal(RetValType, DelegateName)` |
+| `RetValType Function(Param1)` | `DECLARE_DELEGATE_RetVal_OneParam(RetValType, DelegateName, Param1Type)` |
+
+➡️ For more parameters, there are `_ThreeParams`, `_FourParams`, etc.
+
+---
+
+## 🧩 Special for UObjects
+
+If you want **UObject-based** delegates (e.g., usable in Blueprints), use:
+
+| Macro                       | Purpose                    |
+|:-----------------------------|:----------------------------|
+| `DECLARE_DYNAMIC_DELEGATE`   | Single dynamic |
+| `DECLARE_DYNAMIC_MULTICAST_DELEGATE` | Multicast dynamic |
+
+---
+
+## ✨ Example with Specifiers
+
+You can add UFUNCTION-style specifiers using `UDELEGATE()`:
+
+```cpp
+UDELEGATE(BlueprintAuthorityOnly)
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(
+    FInstigatedAnyDamageSignature,
+    float, Damage,
+    const UDamageType*, DamageType,
+    AActor*, DamagedActor,
+    AActor*, DamageCauser
+);
+```
+
+---
+
+## 🛠 Binding Delegates
+
+Depending on the type of object, different **Bind** methods are used:
+
+| Bind Function | Description |
+|:--------------|:------------|
+| `Bind()`      | Bind to an already created delegate |
+| `BindStatic()`| Bind to a static global function |
+| `BindRaw()`   | Bind to a raw C++ pointer (⚠️ unsafe if deleted) |
+| `BindLambda()`| Bind to a C++ lambda function |
+| `BindSP()`    | Bind to a Shared Pointer object |
+| `BindUObject()`| Bind to a `UObject` (safe weak binding) |
+| `Unbind()`    | Unbind the delegate |
+
+---
+
+## 🎯 Payload Data (Extra Arguments)
+
+When you bind a delegate, you can **pass payload data** (additional values that are stored inside the delegate at bind time).
+
+Example:
+```cpp
+MyDelegate.BindRaw(&MyFunction, true, 20);
+```
+(Here, `true` and `20` are payload values.)
+
+**Note**: Dynamic delegates (`UObject` based) **do not** support payloads.
+
+---
+
+## ⚡ Executing Delegates
+
+| Function | Behavior |
+|:---------|:---------|
+| `Execute()` | Executes without checking if bound (⚠️ unsafe if not bound) |
+| `ExecuteIfBound()` | Safely checks if bound first |
+| `IsBound()` | Returns whether the delegate is currently bound |
+
+Example safe usage:
+```cpp
+if (MyDelegate.IsBound())
+{
+    MyDelegate.Execute();
+}
+
+// OR
+MyDelegate.ExecuteIfBound();
+```
+
+---
+
+## 📚 Example: Full Delegate Setup
+
+Suppose you have a class:
+
+```cpp
+class FLogWriter
+{
+public:
+    void WriteToLog(FString Text);
+};
+```
+
+1. **Declare the delegate type**:
+
+```cpp
+DECLARE_DELEGATE_OneParam(FStringDelegate, FString);
+```
+
+2. **Use the delegate inside another class**:
+
+```cpp
+class FMyClass
+{
+public:
+    FStringDelegate WriteToLogDelegate;
+};
+```
+
+3. **Bind the delegate**:
+
+```cpp
+TSharedRef<FLogWriter> LogWriter = MakeShared<FLogWriter>();
+WriteToLogDelegate.BindSP(LogWriter, &FLogWriter::WriteToLog);
+```
+
+4. **Execute the delegate**:
+
+```cpp
+WriteToLogDelegate.Execute(TEXT("Delegates are awesome!"));
+```
+
+or safely:
+
+```cpp
+WriteToLogDelegate.ExecuteIfBound(TEXT("Only if bound!"));
+```
+
+---
+
+# 📖 Key Takeaways
+
+- Use `GENERATED_BODY()` and `DECLARE_*` macros correctly.
+- Use `BindSP()`, `BindRaw()`, `BindLambda()`, `BindUObject()` depending on the context.
+- Always check `IsBound()` if safety is important.
+- Prefer `ExecuteIfBound()` over `Execute()` unless you are 100% sure it is bound.
+
+---
+
