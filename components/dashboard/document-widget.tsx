@@ -78,12 +78,22 @@ export function DocumentWidget({ userId }: DocumentWidgetProps) {
     const now = Date.now()
 
     documents.forEach((doc) => {
-      if (
-        doc.status === "processing" &&
-        doc.processing_progress === 0 &&
-        new Date(doc.updated_at).getTime() < now - 30000
-      ) {
-        stalledIds.add(doc.id)
+      try {
+        // Safely check if updated_at is a valid date
+        const updatedAt = doc.updated_at ? new Date(doc.updated_at) : null
+        const updatedTime = updatedAt && !isNaN(updatedAt.getTime()) ? updatedAt.getTime() : 0
+
+        if (
+          doc.status === "processing" &&
+          (doc.processing_progress === 0 || doc.processing_progress === undefined) &&
+          updatedTime > 0 && // Make sure we have a valid timestamp
+          updatedTime < now - 30000
+        ) {
+          stalledIds.add(doc.id)
+        }
+      } catch (e) {
+        console.error(`Error processing document ${doc.id}:`, e)
+        // Skip this document if there's an error
       }
     })
 
