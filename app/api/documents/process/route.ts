@@ -10,7 +10,7 @@
  * - @/utils/apiRequest for standardized API responses
  * - @/utils/validation for input validation
  * - @/lib/utils/logger for logging
- * - @/services/document-service for document processing
+ * - @/lib/document-service for document processing
  */
 
 import type { NextRequest } from "next/server"
@@ -18,7 +18,7 @@ import { handleApiRequest } from "@/utils/apiRequest"
 import { withErrorHandling } from "@/utils/errorHandling"
 import { validateRequiredFields } from "@/utils/validation"
 import { logger } from "@/lib/utils/logger"
-import { processDocument } from "@/services/document-service"
+import { processDocument } from "@/lib/document-service"
 import { NextResponse } from "next/server"
 
 export const runtime = "edge"
@@ -74,7 +74,7 @@ export const POST = withErrorHandling(async (request: NextRequest) => {
           fileName,
           fileType,
           fileUrl,
-        }).catch(processingError => {
+        }).catch((processingError) => {
           logger.error(`Error in background document processing`, {
             documentId,
             error: processingError instanceof Error ? processingError.message : "Unknown error",
