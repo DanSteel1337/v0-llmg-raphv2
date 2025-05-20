@@ -26,6 +26,51 @@ export function DocumentWidget({ userId }: DocumentWidgetProps) {
   const [currentStep, setCurrentStep] = useState<ProcessingStep | undefined>(undefined)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [stalledDocuments, setStalledDocuments] = useState<Set<string>>(new Set())
+  const [processingDocumentId, setProcessingDocumentId] = useState<string | null>(null)
+
+  // Use this effect to track progress of the currently processing document
+  useEffect(() => {
+    if (!processingDocumentId) return
+
+    // Find the document in the documents array
+    const processingDoc = documents.find((doc) => doc.id === processingDocumentId)
+    if (!processingDoc) return
+
+    // Update progress based on document status
+    if (processingDoc.status === "indexed") {
+      setUploadProgress(100)
+      setCurrentStep(ProcessingStep.COMPLETED)
+      setProcessingDocumentId(null) // Clear processing document ID
+    } else if (processingDoc.status === "failed") {
+      setUploadProgress(0)
+      setCurrentStep(ProcessingStep.FAILED)
+      setProcessingDocumentId(null) // Clear processing document ID
+    } else if (processingDoc.status === "processing" && processingDoc.processing_progress !== undefined) {
+      // Ensure progress is at least 15% once processing starts
+      const progress = Math.max(15, processingDoc.processing_progress)
+      setUploadProgress(progress)
+
+      // Determine processing step based on progress
+      let step = processingDoc.processing_step
+      if (!step) {
+        if (progress < 20) step = ProcessingStep.CHUNKING
+        else if (progress < 40) step = ProcessingStep.EMBEDDING
+        else if (progress < 80) step = ProcessingStep.INDEXING
+        else step = ProcessingStep.FINALIZING
+      }
+      setCurrentStep(step)
+    }
+  }, [documents, processingDocumentId])
+
+  // Refresh documents more frequently when uploading
+  useEffect(() => {
+    if (processingDocumentId) {
+      const interval = setInterval(() => {
+        refreshDocuments()
+      }, 2000) // Poll every 2 seconds during active upload
+      return () => clearInterval(interval)
+    }
+  }, [processingDocumentId, refreshDocuments])
 
   useEffect(() => {
     // Check for documents stuck at 0% for more than 30 seconds
@@ -84,19 +129,15 @@ export function DocumentWidget({ userId }: DocumentWidgetProps) {
       setCurrentStep(undefined)
 
       try {
-        // Create a simple callback that doesn't use closures or component state directly
-        // Instead, we'll use primitive values that are copied by value
-        const updateProgress = (progress: number, step?: ProcessingStep) => {
-          // Use window.setTimeout to break the closure chain
-          window.setTimeout(() => {
-            setUploadProgress(progress)
-            if (step !== undefined) {
-              setCurrentStep(step)
-            }
-          }, 0)
-        }
+        // Don't pass a callback - we'll track progress using the document state
+        const document = await uploadDocument(file)
 
-        await uploadDocument(file, updateProgress)
+        // Set initial progress and step
+        setUploadProgress(15)
+        setCurrentStep(ProcessingStep.CHUNKING)
+
+        // Store the document ID for tracking
+        setProcessingDocumentId(document.id)
 
         toast({
           title: "Document uploaded",
@@ -109,8 +150,8 @@ export function DocumentWidget({ userId }: DocumentWidgetProps) {
           description: error instanceof Error ? error.message : "An unknown error occurred",
           variant: "destructive",
         })
-      } finally {
         setIsUploading(false)
+      } finally {
         if (fileInputRef.current) {
           fileInputRef.current.value = ""
         }
@@ -176,6 +217,17 @@ export function DocumentWidget({ userId }: DocumentWidgetProps) {
         return "text-blue-600"
     }
   }
+
+  // When a document is fully processed, clear the uploading state
+  useEffect(() => {
+    if (isUploading && uploadProgress === 100) {
+      // Wait a moment before clearing the uploading state
+      const timer = setTimeout(() => {
+        setIsUploading(false)
+      }, 1000)
+      return () => clearTimeout(timer)
+    }
+  }, [isUploading, uploadProgress])
 
   return (
     <DashboardCard title="Documents" description="Upload and manage your documents">

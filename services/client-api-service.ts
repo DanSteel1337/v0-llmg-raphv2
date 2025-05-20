@@ -86,29 +86,13 @@ export function getProcessingStepDescription(step?: ProcessingStep): string {
  *
  * @param userId User ID who owns the document
  * @param file File to upload
- * @param onProgress Optional progress callback
  * @returns Uploaded document metadata
  */
-export async function uploadDocument(
-  userId: string,
-  file: File,
-  onProgress?: (progress: number, step?: ProcessingStep) => void,
-): Promise<Document> {
+export async function uploadDocument(userId: string, file: File): Promise<Document> {
   try {
     // Validate inputs
     if (!userId) throw new Error("User ID is required")
     if (!file) throw new Error("File is required")
-
-    // Create a safe progress callback that won't throw if it becomes invalid
-    const safeProgress = (progress: number, step?: ProcessingStep) => {
-      try {
-        if (typeof onProgress === "function") {
-          onProgress(progress, step)
-        }
-      } catch (error) {
-        console.error("Error in progress callback:", error)
-      }
-    }
 
     // Step 1: Create document metadata
     console.log("Creating document metadata...", {
@@ -148,9 +132,6 @@ export async function uploadDocument(
       filePath: document.file_path,
     })
 
-    // Update progress with initializing step
-    safeProgress(5, ProcessingStep.INITIALIZING)
-
     const formData = new FormData()
     formData.append("file", file)
     formData.append("userId", userId)
@@ -171,9 +152,6 @@ export async function uploadDocument(
       console.error("File upload failed:", uploadResponse)
       throw new Error("File upload failed")
     }
-
-    // Update progress with reading file step
-    safeProgress(10, ProcessingStep.READING_FILE)
 
     // Get the file URL (prioritize blobUrl)
     const fileUrl =
@@ -218,82 +196,6 @@ export async function uploadDocument(
       console.error("Error triggering document processing:", error)
       throw new Error(
         `Failed to start document processing: ${error instanceof Error ? error.message : "Unknown error"}`,
-      )
-    }
-
-    // Step 4: Set up progress tracking if callback provided
-    if (typeof onProgress === "function") {
-      // Initial progress update - use the safe wrapper
-      safeProgress(15, ProcessingStep.CHUNKING)
-
-      // Use a simple polling mechanism without closures
-      const documentId = document.id // Capture document ID in local variable
-
-      // Create a polling function that doesn't rely on closures
-      const pollDocumentStatus = () => {
-        fetchDocuments(userId)
-          .then((documents) => {
-            const updatedDoc = documents.find((d) => d.id === documentId)
-            if (!updatedDoc) return
-
-            try {
-              if (updatedDoc.status === "indexed") {
-                safeProgress(100, ProcessingStep.COMPLETED)
-                return true // Signal to stop polling
-              } else if (updatedDoc.status === "failed") {
-                safeProgress(0, ProcessingStep.FAILED)
-                return true // Signal to stop polling
-              } else if (updatedDoc.processing_progress !== undefined) {
-                // Ensure progress is at least 15% once processing starts
-                const progress = Math.max(15, updatedDoc.processing_progress)
-
-                // Determine processing step based on progress
-                let step = updatedDoc.processing_step
-                if (!step) {
-                  if (progress < 20) step = ProcessingStep.CHUNKING
-                  else if (progress < 40) step = ProcessingStep.EMBEDDING
-                  else if (progress < 80) step = ProcessingStep.INDEXING
-                  else step = ProcessingStep.FINALIZING
-                }
-
-                safeProgress(progress, step)
-              }
-            } catch (error) {
-              console.error("Error updating progress:", error)
-            }
-
-            return false // Continue polling
-          })
-          .catch((error) => {
-            console.error("Error polling document status:", error)
-            return true // Signal to stop polling on error
-          })
-      }
-
-      // Start polling with setTimeout instead of setInterval
-      // This avoids overlapping calls and is more robust
-      let isPolling = true
-      const poll = () => {
-        if (!isPolling) return
-
-        const shouldStop = pollDocumentStatus()
-        if (shouldStop) {
-          isPolling = false
-          return
-        }
-
-        setTimeout(poll, 2000)
-      }
-
-      // Start polling
-      setTimeout(poll, 2000)
-
-      // Stop polling after 5 minutes (max processing time)
-      setTimeout(
-        () => {
-          isPolling = false
-        },
-        5 * 60 * 1000,
       )
     }
 
