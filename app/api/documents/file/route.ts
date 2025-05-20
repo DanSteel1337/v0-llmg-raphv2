@@ -4,7 +4,7 @@ import type { NextRequest } from "next/server"
 import { NextResponse } from "next/server"
 import { withErrorHandling } from "@/utils/errorHandling"
 import { logger } from "@/lib/utils/logger"
-import { getBlob } from "@vercel/blob"
+import { head } from "@vercel/blob"  // Changed from getBlob to head
 
 export const runtime = "edge"
 
@@ -32,15 +32,15 @@ export const GET = withErrorHandling(async (request: NextRequest) => {
       // Check if this is a blob path (starts with documents/)
       if (path.startsWith("documents/")) {
         try {
-          // Try to get the blob directly
-          const blob = await getBlob(path)
+          // Try to get the blob metadata using head instead of getBlob
+          const blobMetadata = await head(path)
 
-          if (blob) {
+          if (blobMetadata) {
             logger.info(`GET /api/documents/file - Redirecting to blob URL for path`, {
               path,
-              blobUrl: blob.url,
+              blobUrl: blobMetadata.url,
             })
-            return NextResponse.redirect(blob.url)
+            return NextResponse.redirect(blobMetadata.url)
           }
         } catch (blobError) {
           logger.warn(`GET /api/documents/file - Error retrieving blob, trying to fetch content directly`, {
