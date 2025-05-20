@@ -1,20 +1,11 @@
 /**
  * User Hook
  *
- * React hook for accessing user information.
- * This is a wrapper around the useAuth hook to maintain naming consistency.
- *
- * @module hooks/useUser
+ * Provides access to the current user information.
+ * Re-exports useAuth hook with a different name for backward compatibility.
  */
 
-"use client"
+import { useAuth } from "@/hooks/use-auth"
 
-import { useAuth } from "./use-auth"
-
-/**
- * Hook for accessing user information
- * @returns User information and authentication state
- */
-export function useUser() {
-  return useAuth()
-}
+// Re-export with alternative name for backward compatibility
+export const useUser = useAuth

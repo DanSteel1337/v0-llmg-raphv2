@@ -1,8 +1,10 @@
 /**
- * Re-export of the useDocuments hook from use-documents.ts
- * This file exists to maintain compatibility with imports using the camelCase naming convention
+ * Documents Hook
+ *
+ * Re-exports useDocuments hook from use-documents.ts for backward compatibility.
  */
 
-import { useDocuments } from "./use-documents"
+import { useDocuments } from "@/hooks/use-documents"
 
+// Re-export for backward compatibility
 export { useDocuments }

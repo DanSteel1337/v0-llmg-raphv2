@@ -36,15 +36,16 @@ export interface Document {
 }
 
 // Document processing step
-export type ProcessingStep =
-  | "initializing"
-  | "reading_file"
-  | "chunking"
-  | "embedding"
-  | "indexing"
-  | "finalizing"
-  | "completed"
-  | "failed"
+export enum ProcessingStep {
+  INITIALIZING = "initializing",
+  READING_FILE = "reading_file",
+  CHUNKING = "chunking",
+  EMBEDDING = "embedding",
+  INDEXING = "indexing",
+  FINALIZING = "finalizing",
+  COMPLETED = "completed",
+  FAILED = "failed",
+}
 
 // Document status
 export type DocumentStatus = "processing" | "indexed" | "failed"
@@ -57,6 +58,7 @@ export interface ProcessDocumentOptions {
   fileName: string
   fileType: string
   fileUrl: string
+  isRetry?: boolean
 }
 
 // Chat message

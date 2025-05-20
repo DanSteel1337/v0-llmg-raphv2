@@ -10,7 +10,8 @@ import { formatFileSize, formatDate } from "@/utils/formatting"
 import { useToast } from "@/components/toast"
 import { useDocuments } from "@/hooks/use-documents"
 import { getProcessingStepDescription } from "@/services/client-api-service"
-import type { Document, ProcessingStep } from "@/types"
+import type { Document } from "@/types"
+import { ProcessingStep } from "@/types"
 
 interface DocumentWidgetProps {
   userId: string
@@ -163,9 +164,9 @@ export function DocumentWidget({ userId }: DocumentWidgetProps) {
   // Function to get step color based on processing step
   const getStepColor = (step?: ProcessingStep) => {
     switch (step) {
-      case "failed":
+      case ProcessingStep.FAILED:
         return "text-red-600"
-      case "completed":
+      case ProcessingStep.COMPLETED:
         return "text-green-600"
       default:
         return "text-blue-600"

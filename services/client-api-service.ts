@@ -19,15 +19,8 @@
  */
 
 import { apiCall } from "./apiCall"
-import type {
-  Document,
-  AnalyticsData,
-  Conversation,
-  Message,
-  SearchResult,
-  SearchOptions,
-  ProcessingStep,
-} from "@/types"
+import type { Document, AnalyticsData, Conversation, Message, SearchResult, SearchOptions } from "@/types"
+import { ProcessingStep } from "@/types"
 
 /**
  * Fetch documents for a user
