@@ -22,7 +22,12 @@
 
 import { useState, useEffect, useCallback, useRef } from "react"
 import { useAuth } from "./use-auth"
-import { fetchDocuments, uploadDocument as apiUploadDocument, deleteDocument as apiDeleteDocument, retryDocumentProcessing } from "@/services/client-api-service"
+import {
+  fetchDocuments,
+  uploadDocument as apiUploadDocument,
+  deleteDocument as apiDeleteDocument,
+  retryDocumentProcessing,
+} from "@/services/client-api-service"
 import type { Document } from "@/types"
 
 /**
@@ -36,6 +41,8 @@ export function useDocuments() {
   const [error, setError] = useState<string | null>(null)
   // Keep track of active polling intervals to properly clean them up
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  // Keep track of retry operations in progress
+  const retryInProgressRef = useRef<Set<string>>(new Set())
 
   // Fetch documents on mount and when user changes
   useEffect(() => {
@@ -82,12 +89,12 @@ export function useDocuments() {
         setDocuments((prevDocs) => {
           // Create a map of existing documents
           const docMap = new Map(prevDocs.map((doc) => [doc.id, doc]))
-          
+
           // Update with latest data
           for (const updatedDoc of updatedDocs) {
             docMap.set(updatedDoc.id, updatedDoc)
           }
-          
+
           return Array.from(docMap.values())
         })
       } catch (err) {
@@ -129,7 +136,7 @@ export function useDocuments() {
         throw err
       }
     },
-    [user?.id]
+    [user?.id],
   )
 
   /**
@@ -155,7 +162,7 @@ export function useDocuments() {
         throw err
       }
     },
-    [user?.id]
+    [user?.id],
   )
 
   /**
@@ -169,25 +176,61 @@ export function useDocuments() {
         throw new Error("User not authenticated")
       }
 
-      try {
-        await retryDocumentProcessing(documentId)
+      // Prevent multiple simultaneous retries for the same document
+      if (retryInProgressRef.current.has(documentId)) {
+        console.warn(`Retry already in progress for document ${documentId}`)
+        return false
+      }
 
-        // Update the document status in the state
+      try {
+        // Mark this document as having a retry in progress
+        retryInProgressRef.current.add(documentId)
+
+        // Update UI state immediately to show processing
         setDocuments((prevDocs) =>
           prevDocs.map((doc) =>
             doc.id === documentId
-              ? { ...doc, status: "processing", processing_progress: 0, error_message: undefined }
-              : doc
-          )
+              ? { ...doc, status: "processing", processing_progress: 5, error_message: undefined }
+              : doc,
+          ),
         )
+
+        // Call the API to retry processing
+        const result = await retryDocumentProcessing(documentId)
+
+        if (!result.success) {
+          throw new Error(result.error || "Failed to retry document processing")
+        }
+
+        // Refresh documents to get the latest status
+        const updatedDocs = await fetchDocuments(user.id)
+        setDocuments(updatedDocs)
 
         return true
       } catch (err) {
         console.error("Error retrying document processing:", err)
+
+        // Update the document status to failed in the UI
+        setDocuments((prevDocs) =>
+          prevDocs.map((doc) =>
+            doc.id === documentId
+              ? {
+                  ...doc,
+                  status: "failed",
+                  processing_progress: 0,
+                  error_message: `Retry failed: ${err instanceof Error ? err.message : "Unknown error"}`,
+                }
+              : doc,
+          ),
+        )
+
         throw err
+      } finally {
+        // Remove the document from the in-progress set
+        retryInProgressRef.current.delete(documentId)
       }
     },
-    [user?.id]
+    [user?.id],
   )
 
   /**

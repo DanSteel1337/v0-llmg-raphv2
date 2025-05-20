@@ -3,18 +3,18 @@
  *
  * Service layer for client-side API interactions with the backend.
  * Provides standardized methods for handling HTTP requests to all API endpoints.
- * 
+ *
  * Features:
  * - Document management (upload, retrieve, delete)
  * - Chat conversations and messages
  * - Search functionality
  * - Analytics data retrieval
  * - Health checks
- * 
+ *
  * Dependencies:
  * - apiCall utility for standardized request handling
  * - Type definitions for proper type safety
- * 
+ *
  * @module services/client-api-service
  */
 
@@ -129,7 +129,9 @@ export async function uploadDocument(
     }
 
     // Get the file URL (prioritize blobUrl)
-    const fileUrl = uploadResponse.blobUrl || uploadResponse.fileUrl || 
+    const fileUrl =
+      uploadResponse.blobUrl ||
+      uploadResponse.fileUrl ||
       `/api/documents/file?path=${encodeURIComponent(document.file_path)}`
 
     console.log("File uploaded successfully:", {
@@ -167,7 +169,9 @@ export async function uploadDocument(
       })
     } catch (error) {
       console.error("Error triggering document processing:", error)
-      throw new Error(`Failed to start document processing: ${error instanceof Error ? error.message : "Unknown error"}`)
+      throw new Error(
+        `Failed to start document processing: ${error instanceof Error ? error.message : "Unknown error"}`,
+      )
     }
 
     // Poll for document status updates if progress callback provided
@@ -196,7 +200,7 @@ export async function uploadDocument(
 
     return {
       ...document,
-      blob_url: uploadResponse.blobUrl,  // Add blob URL to document
+      blob_url: uploadResponse.blobUrl, // Add blob URL to document
     }
   } catch (error) {
     console.error("Document upload pipeline failed:", error)
@@ -251,13 +255,13 @@ export async function fetchAnalytics(userId: string, timeframe?: string): Promis
   try {
     if (!userId) {
       console.error("fetchAnalytics called without userId")
-      return { 
-        documentCount: 0, 
-        chunkCount: 0, 
-        searchCount: 0, 
-        chatCount: 0, 
-        topDocuments: [], 
-        topSearches: [] 
+      return {
+        documentCount: 0,
+        chunkCount: 0,
+        searchCount: 0,
+        chatCount: 0,
+        topDocuments: [],
+        topSearches: [],
       }
     }
 
@@ -267,13 +271,13 @@ export async function fetchAnalytics(userId: string, timeframe?: string): Promis
     return response
   } catch (error) {
     console.error("Error fetching analytics:", error)
-    return { 
-      documentCount: 0, 
-      chunkCount: 0, 
-      searchCount: 0, 
-      chatCount: 0, 
-      topDocuments: [], 
-      topSearches: [] 
+    return {
+      documentCount: 0,
+      chunkCount: 0,
+      searchCount: 0,
+      chatCount: 0,
+      topDocuments: [],
+      topSearches: [],
     }
   }
 }
@@ -283,39 +287,39 @@ export async function fetchAnalytics(userId: string, timeframe?: string): Promis
  *
  * @returns Health status object with service health indicators
  */
-export async function checkApiHealth(): Promise<{ 
-  pineconeApiHealthy: boolean | null; 
-  openaiApiHealthy: boolean | null; 
-  errors?: { 
-    pinecone?: string | null; 
-    openai?: string | null; 
-  } 
+export async function checkApiHealth(): Promise<{
+  pineconeApiHealthy: boolean | null
+  openaiApiHealthy: boolean | null
+  errors?: {
+    pinecone?: string | null
+    openai?: string | null
+  }
 }> {
   try {
     const response = await apiCall<{
-      success: boolean;
-      status: string;
-      services: Record<string, boolean>;
+      success: boolean
+      status: string
+      services: Record<string, boolean>
       errors: {
-        pinecone: string | null;
-        openai: string | null;
+        pinecone: string | null
+        openai: string | null
       }
     }>("/api/health")
 
     return {
       pineconeApiHealthy: response?.services?.pinecone ?? null,
       openaiApiHealthy: response?.services?.openai ?? null,
-      errors: response?.errors
+      errors: response?.errors,
     }
   } catch (error) {
     console.error("Error checking API health:", error)
-    return { 
-      pineconeApiHealthy: false, 
+    return {
+      pineconeApiHealthy: false,
       openaiApiHealthy: false,
       errors: {
         pinecone: error instanceof Error ? error.message : "Unknown error",
-        openai: "Connection failed"
-      }
+        openai: "Connection failed",
+      },
     }
   }
 }
@@ -421,11 +425,7 @@ export async function fetchMessages(conversationId: string): Promise<Message[]> 
  * @param userId User ID sending the message
  * @returns The AI message response
  */
-export async function sendMessage(
-  conversationId: string,
-  content: string,
-  userId: string
-): Promise<Message | null> {
+export async function sendMessage(conversationId: string, content: string, userId: string): Promise<Message | null> {
   try {
     if (!conversationId) throw new Error("Conversation ID is required")
     if (!userId) throw new Error("User ID is required")
@@ -466,7 +466,7 @@ export async function sendMessage(
 export async function performSearch(
   userId: string,
   query: string,
-  options: SearchOptions = { type: "semantic" }
+  options: SearchOptions = { type: "semantic" },
 ): Promise<SearchResult[]> {
   try {
     if (!userId) throw new Error("User ID is required")
@@ -485,7 +485,7 @@ export async function performSearch(
 
     // Add document type filters if present
     if (options.documentTypes && Array.isArray(options.documentTypes)) {
-      options.documentTypes.forEach(type => {
+      options.documentTypes.forEach((type) => {
         searchParams.append("documentType", type)
       })
     }
@@ -506,7 +506,7 @@ export async function performSearch(
     }
 
     const response = await apiCall<{ success: boolean; results: SearchResult[] }>(
-      `/api/search?${searchParams.toString()}`
+      `/api/search?${searchParams.toString()}`,
     )
 
     if (!response || !response.success) {
