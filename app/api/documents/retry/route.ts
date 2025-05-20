@@ -1,137 +1,72 @@
 /**
- * Document Retry API Route
+ * Document Retry Processing API Route
  *
- * Allows manual retrying of document processing for failed documents.
- * Validates document existence and status before triggering reprocessing.
- * 
- * IMPORTANT:
- * - ALWAYS declare runtime = "edge" for compatibility with Vercel Edge
- * - ALWAYS check document exists before attempting to retry
- * - NEVER retry documents that are already processing
- * - ALWAYS return { success: true/false } in responses
- * - Use background processing pattern to handle long-running tasks
- * 
+ * Handles retrying document processing for failed documents.
+ * This route is Edge-compatible and works with Vercel's serverless environment.
+ *
  * Dependencies:
+ * - @/utils/errorHandling for consistent error handling
+ * - @/utils/apiRequest for standardized API responses
  * - @/lib/document-service for document operations
- * - @/lib/utils/logger for structured logging
- * 
- * @module app/api/documents/retry/route
+ * - @/lib/utils/logger for logging
  */
 
 import type { NextRequest } from "next/server"
-import { NextResponse } from "next/server"
-import { getDocumentById, processDocument } from "@/lib/document-service"
+import { handleApiRequest } from "@/utils/apiRequest"
+import { withErrorHandling } from "@/utils/errorHandling"
+import { getDocumentById, processDocument, updateDocumentStatus } from "@/lib/document-service"
 import { logger } from "@/lib/utils/logger"
 
 export const runtime = "edge"
 
-export async function POST(request: NextRequest) {
-  try {
-    // Parse request body with error handling
-    let body;
+export const POST = withErrorHandling(async (request: NextRequest) => {
+  return handleApiRequest(async () => {
+    const body = await request.json()
+    const { documentId } = body
+
+    if (!documentId) {
+      return { success: false, error: "Document ID is required" }
+    }
+
+    logger.info(`POST /api/documents/retry - Retrying document processing`, { documentId })
+
     try {
-      body = await request.json();
-    } catch (parseError) {
-      logger.error("Failed to parse request body", { 
-        error: parseError instanceof Error ? parseError.message : "Unknown error" 
-      });
-      
-      return NextResponse.json(
-        { success: false, error: "Invalid request body format - must be JSON" },
-        { status: 400 }
-      );
-    }
-    
-    // Validate document ID - explicit check for existence and type
-    if (!body.documentId) {
-      logger.error("Missing documentId in retry request");
-      
-      return NextResponse.json(
-        { success: false, error: "Document ID is required" },
-        { status: 400 }
-      );
-    }
-    
-    const { documentId } = body;
+      // Get document details
+      const document = await getDocumentById(documentId)
 
-    logger.info(`Retry requested for document: ${documentId}`);
+      if (!document) {
+        logger.warn(`POST /api/documents/retry - Document not found`, { documentId })
+        return { success: false, error: "Document not found" }
+      }
 
-    // Get document details with error handling
-    let document;
-    try {
-      document = await getDocumentById(documentId);
-    } catch (lookupError) {
-      logger.error(`Error retrieving document for retry: ${documentId}`, {
-        error: lookupError instanceof Error ? lookupError.message : "Unknown error" 
-      });
-      
-      return NextResponse.json(
-        { success: false, error: `Error retrieving document: ${lookupError instanceof Error ? lookupError.message : "Unknown error"}` },
-        { status: 500 }
-      );
-    }
+      // Update document status to processing
+      await updateDocumentStatus(documentId, "processing", 0, "Retrying document processing")
 
-    // Check if document exists
-    if (!document) {
-      logger.error(`Document not found for retry: ${documentId}`);
-      
-      return NextResponse.json(
-        { success: false, error: "Document not found" },
-        { status: 404 }
-      );
-    }
+      // Determine the file URL
+      // First check if we have a blob_url in the document metadata
+      let fileUrl = document.blob_url
 
-    // Check if document is already processing
-    if (document.status === "processing") {
-      logger.warn(`Document is already processing: ${documentId}`);
-      
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Document is already being processed",
-          status: document.status,
-          progress: document.processing_progress,
-        },
-        { status: 409 }
-      );
-    }
+      // If no blob_url, construct a path-based URL
+      if (!fileUrl) {
+        // Check if the file_path looks like a blob path (starts with documents/)
+        if (document.file_path && document.file_path.startsWith("documents/")) {
+          fileUrl = `/api/documents/file?path=${encodeURIComponent(document.file_path)}`
+        } else {
+          // Legacy path
+          fileUrl = `/api/documents/file?path=${encodeURIComponent(document.file_path)}`
+        }
+      }
 
-    // Check if document has required fields for processing
-    if (!document.file_path || !document.name) {
-      logger.error(`Document missing required fields for retry: ${documentId}`);
-      
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Document is missing required fields for processing",
-          document: {
-            id: document.id,
-            name: document.name,
-            file_path: document.file_path,
-          },
-        },
-        { status: 400 }
-      );
-    }
+      logger.info(`POST /api/documents/retry - Starting document processing`, {
+        documentId,
+        fileUrl,
+        fileName: document.name,
+        fileType: document.file_type,
+      })
 
-    // Construct file URL from file path
-    // This assumes file_path contains the full path to the file
-    const fileUrl = document.file_path.startsWith("http")
-      ? document.file_path
-      : `${request.nextUrl.origin}${document.file_path}`;
-
-    logger.info(`Retrying document processing`, {
-      documentId,
-      previousStatus: document.status,
-      fileName: document.name,
-      fileUrl,
-    });
-
-    // Trigger document processing - wrap in try/catch
-    try {
-      // We're not awaiting this to avoid timeout issues
+      // Process the document asynchronously
       processDocument({
-        documentId: document.id,
+        documentId,
         userId: document.user_id,
         filePath: document.file_path,
         fileName: document.name,
@@ -139,47 +74,22 @@ export async function POST(request: NextRequest) {
         fileUrl,
         isRetry: true,
       }).catch((error) => {
-        logger.error(`Error in background document processing: ${error instanceof Error ? error.message : "Unknown error"}`, {
+        logger.error(`POST /api/documents/retry - Error processing document`, {
           documentId,
-          stack: error instanceof Error ? error.stack : String(error),
-        });
-      });
-      
-      // Return success response ALWAYS with success: true flag
-      return NextResponse.json(
-        {
-          success: true,
-          message: "Document processing retry initiated",
-          documentId: document.id,
-          previousStatus: document.status,
-        },
-        { status: 200 }
-      );
-    } catch (error) {
-      logger.error(`Error initiating retry process: ${error instanceof Error ? error.message : "Unknown error"}`, {
-        documentId,
-        stack: error instanceof Error ? error.stack : String(error),
-      });
-      
-      return NextResponse.json(
-        {
-          success: false,
-          error: `Failed to start retry: ${error instanceof Error ? error.message : "Unknown error"}`,
-        },
-        { status: 500 }
-      );
-    }
-  } catch (error) {
-    logger.error(`Error in retry API route: ${error instanceof Error ? error.message : "Unknown error"}`);
+          error: error instanceof Error ? error.message : "Unknown error",
+          stack: error instanceof Error ? error.stack : undefined,
+        })
+      })
 
-    return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : "An unknown error occurred",
-      },
-      {
-        status: 500,
-      }
-    );
-  }
-}
+      logger.info(`POST /api/documents/retry - Document processing started`, { documentId })
+      return { success: true, status: "processing" }
+    } catch (error) {
+      logger.error(`POST /api/documents/retry - Error retrying document processing`, {
+        documentId,
+        error: error instanceof Error ? error.message : "Unknown error",
+        stack: error instanceof Error ? error.stack : undefined,
+      })
+      throw error
+    }
+  }, request)
+})

@@ -22,6 +22,8 @@
  * - @/lib/embedding-service for embedding generation
  * - @/lib/chunking-utils for document text processing
  * - @/lib/utils/logger for structured logging
+ * - @/lib/blob-client for blob storage operations
+ * - @/types for document types
  *
  * @module lib/document-service
  */
@@ -31,6 +33,7 @@ import { generateEmbedding } from "@/lib/embedding-service"
 import { chunkDocument } from "@/lib/chunking-utils"
 import { EMBEDDING_MODEL } from "@/lib/embedding-config"
 import { logger } from "@/lib/utils/logger"
+import { deleteFromBlob } from "@/lib/blob-client"
 import type { Document, ProcessDocumentOptions } from "@/types"
 
 // Constants
@@ -38,6 +41,7 @@ const MAX_CHUNK_SIZE = 1000 // Optimal size for embedding chunks
 const CHUNK_OVERLAP = 150 // Overlap between consecutive chunks
 const EMBEDDING_BATCH_SIZE = 10 // Process embeddings in small batches
 const MAX_RETRIES = 3 // Maximum retries for API operations
+const UPSERT_BATCH_SIZE = 100 // Batch size for upserting vectors to Pinecone
 
 /**
  * Creates a new document and stores its metadata
@@ -105,7 +109,7 @@ export async function createDocument(
  * @param userId - User ID to filter documents
  * @returns Array of documents
  */
-export async function getDocumentsByUserId(userId: string): Promise<Document[]> {
+export async function fetchDocuments(userId: string): Promise<Document[]> {
   logger.info(`Getting documents for user`, { userId })
 
   // Create a placeholder vector with non-zero values
@@ -156,7 +160,7 @@ export async function getDocumentsByUserId(userId: string): Promise<Document[]> 
  * @param id - Document ID
  * @returns Document object or null if not found
  */
-export async function getDocumentById(id: string): Promise<Document | null> {
+export async function fetchDocumentById(id: string): Promise<Document | null> {
   // Create a placeholder vector with small non-zero values
   const placeholderVector = createPlaceholderVector()
 
@@ -217,7 +221,7 @@ export async function updateDocumentStatus(
   debugInfo?: Record<string, any>,
 ): Promise<Document> {
   // Get current document
-  const document = await getDocumentById(documentId)
+  const document = await fetchDocumentById(documentId)
 
   if (!document) {
     throw new Error("Document not found")
@@ -263,7 +267,7 @@ export async function updateDocumentStatus(
  * @param options - Document processing options
  * @returns Processing result
  */
-export async function processDocument({
+export async function processDocumentAndEmbed({
   documentId,
   userId,
   filePath,
@@ -298,7 +302,7 @@ export async function processDocument({
 
     // Check if document is already being processed (prevent duplicate processing)
     if (!isRetry) {
-      const existingDoc = await getDocumentById(documentId)
+      const existingDoc = await fetchDocumentById(documentId)
       if (existingDoc && existingDoc.status === "processing" && existingDoc.processing_progress > 0) {
         logger.warn(
           `Document ${documentId} is already being processed (progress: ${existingDoc.processing_progress}%). Skipping.`,
@@ -543,7 +547,6 @@ export async function processDocument({
     )
 
     // 3. Generate embeddings and store in Pinecone
-    const UPSERT_BATCH_SIZE = 100
     let successfulEmbeddings = 0
     let failedEmbeddings = 0
     let totalVectorsInserted = 0
@@ -911,7 +914,7 @@ export async function processDocument({
  *
  * @param id - Document ID
  */
-export async function deleteDocument(id: string): Promise<void> {
+export async function deleteDocument(id: string): Promise<boolean> {
   // Delete the document
   await deleteVectors([id]) // Use consistent ID pattern with no prefix
 
@@ -929,6 +932,36 @@ export async function deleteDocument(id: string): Promise<void> {
     const chunkIds = response.matches.map((match) => match.id)
     await deleteVectors(chunkIds)
   }
+
+  // Get the document to find its blob path
+  const document = await fetchDocumentById(id)
+
+  if (!document) {
+    logger.warn(`Document not found for deletion`, { id })
+    return false
+  }
+
+  // Delete the file from blob storage if file_path looks like a blob path
+  if (document.file_path && document.file_path.startsWith("documents/")) {
+    logger.info(`Deleting document file from blob storage`, {
+      id,
+      filePath: document.file_path,
+    })
+
+    try {
+      await deleteFromBlob(document.file_path)
+      logger.info(`Document file deleted from blob storage`, { id })
+    } catch (blobError) {
+      logger.error(`Error deleting document file from blob storage`, {
+        id,
+        filePath: document.file_path,
+        error: blobError instanceof Error ? blobError.message : "Unknown error",
+      })
+      // Continue with the document deletion even if blob deletion fails
+    }
+  }
+
+  return true
 }
 
 /**

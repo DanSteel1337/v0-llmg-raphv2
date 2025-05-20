@@ -2,13 +2,13 @@
  * Type Definitions
  *
  * Shared types used throughout the application.
- * 
+ *
  * IMPORTANT:
  * - ALWAYS use these shared types for consistency
  * - NEVER modify the core fields without updating all usages
  * - ALWAYS use the standard document status values: "processing", "indexed", "failed"
  * - Document IDs should follow the format: doc_${timestamp}_${random}
- * 
+ *
  * @module types
  */
 
@@ -21,6 +21,7 @@ export interface Document {
   file_type: string
   file_size: number
   file_path: string
+  blob_url?: string // Added for Vercel Blob integration
   status: "processing" | "indexed" | "failed" // FIXED: Removed "created" status
   processing_progress?: number
   error_message?: string

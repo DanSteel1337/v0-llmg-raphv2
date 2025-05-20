@@ -43,6 +43,7 @@ const MAX_RETRIES = 3 // Maximum retries for API operations
  * @param fileType - Document MIME type
  * @param fileSize - Document size in bytes
  * @param filePath - Storage path for the document
+ * @param blobUrl - Optional Vercel Blob URL
  * @returns Created document metadata
  */
 export async function createDocument(
@@ -52,6 +53,7 @@ export async function createDocument(
   fileType?: string,
   fileSize?: number,
   filePath?: string,
+  blobUrl?: string,
 ): Promise<Document> {
   const timestamp = Date.now()
   const random = Math.floor(Math.random() * 10000)
@@ -66,6 +68,7 @@ export async function createDocument(
     file_type: fileType || "text/plain",
     file_size: fileSize || 0,
     file_path: filePath || "",
+    blob_url: blobUrl, // Store blob URL if provided
     status: "processing", // Set initial status to "processing" instead of "created"
     processing_progress: 0,
     error_message: undefined,
@@ -73,7 +76,7 @@ export async function createDocument(
     updated_at: now,
   }
 
-  logger.info(`Creating document record`, { userId, name, documentId })
+  logger.info(`Creating document record`, { userId, name, documentId, hasBlobUrl: !!blobUrl })
 
   // Create a placeholder vector with small non-zero values
   const placeholderVector = createPlaceholderVector()
@@ -92,6 +95,49 @@ export async function createDocument(
   logger.info(`Document record created successfully`, { documentId, userId })
 
   return document
+}
+
+/**
+ * Updates a document's blob URL
+ *
+ * @param documentId - Document ID
+ * @param blobUrl - Vercel Blob URL
+ * @returns Updated document
+ */
+export async function updateDocumentBlobUrl(documentId: string, blobUrl: string): Promise<Document> {
+  // Get current document
+  const document = await getDocumentById(documentId)
+
+  if (!document) {
+    throw new Error("Document not found")
+  }
+
+  const updatedDocument = {
+    ...document,
+    blob_url: blobUrl,
+    updated_at: new Date().toISOString(),
+  }
+
+  logger.info(`Updating document blob URL`, {
+    documentId,
+    blobUrl: blobUrl.substring(0, 100) + (blobUrl.length > 100 ? "..." : ""),
+  })
+
+  // Create a non-zero placeholder vector
+  const placeholderVector = createPlaceholderVector()
+
+  await upsertVectors([
+    {
+      id: documentId,
+      values: placeholderVector,
+      metadata: {
+        ...updatedDocument,
+        record_type: "document",
+      },
+    },
+  ])
+
+  return updatedDocument
 }
 
 /**
@@ -133,6 +179,7 @@ export async function getDocumentsByUserId(userId: string): Promise<Document[]> 
     file_type: match.metadata?.file_type as string,
     file_size: match.metadata?.file_size as number,
     file_path: match.metadata?.file_path as string,
+    blob_url: match.metadata?.blob_url as string | undefined,
     status: match.metadata?.status as "processing" | "indexed" | "failed",
     processing_progress: match.metadata?.processing_progress as number,
     error_message: match.metadata?.error_message as string | undefined,
@@ -185,6 +232,7 @@ export async function getDocumentById(id: string): Promise<Document | null> {
     file_type: match.metadata?.file_type as string,
     file_size: match.metadata?.file_size as number,
     file_path: match.metadata?.file_path as string,
+    blob_url: match.metadata?.blob_url as string | undefined,
     status: match.metadata?.status as "processing" | "indexed" | "failed",
     processing_progress: match.metadata?.processing_progress as number,
     error_message: match.metadata?.error_message as string | undefined,
@@ -325,7 +373,7 @@ export async function processDocument({
     // 1. Extract text from document
     logger.info(`Processing document: Fetching content`, {
       documentId,
-      fileUrl,
+      fileUrl: fileUrl.substring(0, 100) + (fileUrl.length > 100 ? "..." : ""),
       isRetry,
       fileName,
       fileType,
@@ -348,7 +396,7 @@ export async function processDocument({
 
         logger.warn(`Fetch attempt ${retries + 1} failed with status ${response.status}`, {
           documentId,
-          fileUrl,
+          fileUrl: fileUrl.substring(0, 100) + (fileUrl.length > 100 ? "..." : ""),
           attempt: retries + 1,
           maxRetries: MAX_RETRIES,
           status: response.status,
@@ -394,7 +442,11 @@ export async function processDocument({
 
     if (!fetchSuccess) {
       const errorMessage = `Failed to fetch document: ${fetchError || "Unknown error"}`
-      logger.error(errorMessage, { documentId, fileUrl, retries })
+      logger.error(errorMessage, {
+        documentId,
+        fileUrl: fileUrl.substring(0, 100) + (fileUrl.length > 100 ? "..." : ""),
+        retries,
+      })
 
       await updateDocumentStatus(documentId, "failed", 0, errorMessage, {
         ...debugInfo,
@@ -421,7 +473,10 @@ export async function processDocument({
     // Validate content is not empty
     if (!text || text.trim() === "") {
       const errorMessage = "Document is empty or contains no valid text content"
-      logger.error(errorMessage, { documentId, fileUrl })
+      logger.error(errorMessage, {
+        documentId,
+        fileUrl: fileUrl.substring(0, 100) + (fileUrl.length > 100 ? "..." : ""),
+      })
 
       await updateDocumentStatus(documentId, "failed", 0, errorMessage, {
         ...debugInfo,
@@ -817,6 +872,10 @@ export async function processDocument({
     debugInfo.totalDuration = performance.now() - startTime
     debugInfo.finalStatus = "indexed"
 
+    // Get the document to preserve any blob_url that might have been set
+    const existingDoc = await getDocumentById(documentId)
+    const blobUrl = existingDoc?.blob_url
+
     await upsertVectors([
       {
         id: documentId, // FIXED: Use consistent ID pattern with no prefix
@@ -828,11 +887,12 @@ export async function processDocument({
           file_type: fileType,
           file_size: text.length,
           file_path: filePath,
+          blob_url: blobUrl, // Preserve blob URL if it exists
           status: "indexed",
           processing_progress: 100,
           chunk_count: successfulEmbeddings,
           embedding_model: EMBEDDING_MODEL,
-          created_at: new Date().toISOString(),
+          created_at: existingDoc?.created_at || new Date().toISOString(),
           updated_at: new Date().toISOString(),
           record_type: "document",
           debug_info: debugInfo,

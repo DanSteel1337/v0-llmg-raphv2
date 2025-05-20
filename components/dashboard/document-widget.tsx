@@ -1,340 +1,245 @@
-/**
- * Document Widget Component
- *
- * A dashboard widget for document upload and listing.
- * Handles optimistic UI updates and monitors document processing progress.
- *
- * Dependencies:
- * - @/components/ui/dashboard-card for layout
- * - @/hooks/use-documents for document operations
- * - @/utils/formatting for display formatting
- * - @/components/toast for notifications
- */
-
 "use client"
 
 import type React from "react"
-import type { Document } from "@/types"
 
-import { useState, useRef, useEffect, useCallback } from "react"
-import { FileText, Upload, AlertCircle, CheckCircle, HelpCircle, Trash, Bug } from "lucide-react"
-import { DashboardCard } from "@/components/ui/dashboard-card"
+import { useState, useCallback, useRef } from "react"
+import { Trash2, Upload, RefreshCw, AlertCircle, FileText, CheckCircle, Clock } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import { Progress } from "@/components/ui/progress"
+import { useToast } from "@/components/ui/use-toast"
 import { useDocuments } from "@/hooks/use-documents"
 import { formatFileSize, formatDate } from "@/utils/formatting"
-import { useToast } from "@/components/toast"
-import { DocumentDebug } from "./document-debug"
+import { DashboardCard } from "@/components/ui/dashboard-card"
+import type { Document } from "@/types"
 
-interface DocumentWidgetProps {
-  userId: string
-  limit?: number
-}
-
-export function DocumentWidget({ userId, limit = 5 }: DocumentWidgetProps) {
-  const { documents, isLoading, error, uploadDocument, refreshDocuments, deleteDocument, retryDocumentProcessing } =
-    useDocuments(userId)
+export function DocumentWidget() {
+  const { documents, isLoading, error, uploadDocument, deleteDocument, retryProcessing } = useDocuments()
+  const { toast } = useToast()
   const [isUploading, setIsUploading] = useState(false)
-  const [errorMessage, setErrorMessage] = useState<string | null>(null)
-  const [processingDocuments, setProcessingDocuments] = useState<Set<string>>(new Set())
-  const [processingTimeouts, setProcessingTimeouts] = useState<Record<string, NodeJS.Timeout>>({})
-  const [selectedDocument, setSelectedDocument] = useState<Document | null>(null)
-  const [showDebugPanel, setShowDebugPanel] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const { addToast } = useToast()
 
-  // Handle API errors
-  useEffect(() => {
-    if (error) {
-      console.error("Document widget error:", error)
-      setErrorMessage(error instanceof Error ? error.message : String(error))
-      addToast("Failed to load documents: " + (error instanceof Error ? error.message : "Unknown error"), "error")
-    } else {
-      setErrorMessage(null)
-    }
-  }, [error, addToast])
+  const handleFileChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0]
+      if (!file) return
 
-  // Track processing documents and set up polling
-  useEffect(() => {
-    if (!Array.isArray(documents)) return
+      // Validate file type - only accept text files for now
+      if (!file.type.includes("text/")) {
+        toast({
+          title: "Invalid file type",
+          description: "Only text files are supported at this time.",
+          variant: "destructive",
+        })
+        return
+      }
 
-    // Find documents that are still processing
-    const currentlyProcessing = new Set<string>()
-    documents.forEach((doc) => {
-      if (doc.status === "processing") {
-        currentlyProcessing.add(doc.id)
+      // Validate file size - max 10MB
+      if (file.size > 10 * 1024 * 1024) {
+        toast({
+          title: "File too large",
+          description: "Maximum file size is 10MB.",
+          variant: "destructive",
+        })
+        return
+      }
 
-        // Set up timeout warning for documents that have been processing for too long
-        if (!processingTimeouts[doc.id]) {
-          const timeout = setTimeout(() => {
-            addToast(`Document "${doc.name}" is taking longer than expected to process.`, "warning")
-          }, 60000) // 60 seconds
+      setIsUploading(true)
+      setUploadProgress(0)
 
-          setProcessingTimeouts((prev) => ({
-            ...prev,
-            [doc.id]: timeout,
-          }))
+      try {
+        await uploadDocument(file, (progress) => {
+          setUploadProgress(progress)
+        })
+
+        toast({
+          title: "Document uploaded",
+          description: "Your document has been uploaded and is being processed.",
+        })
+      } catch (error) {
+        console.error("Error uploading document:", error)
+        toast({
+          title: "Upload failed",
+          description: error instanceof Error ? error.message : "An unknown error occurred",
+          variant: "destructive",
+        })
+      } finally {
+        setIsUploading(false)
+        setUploadProgress(0)
+        if (fileInputRef.current) {
+          fileInputRef.current.value = ""
         }
-      } else if (processingTimeouts[doc.id]) {
-        // Clear timeout for documents that are no longer processing
-        clearTimeout(processingTimeouts[doc.id])
-        setProcessingTimeouts((prev) => {
-          const newTimeouts = { ...prev }
-          delete newTimeouts[doc.id]
-          return newTimeouts
+      }
+    },
+    [uploadDocument, toast],
+  )
+
+  const handleDeleteDocument = useCallback(
+    async (documentId: string) => {
+      try {
+        await deleteDocument(documentId)
+        toast({
+          title: "Document deleted",
+          description: "The document has been removed from your library.",
+        })
+      } catch (error) {
+        console.error("Error deleting document:", error)
+        toast({
+          title: "Delete failed",
+          description: error instanceof Error ? error.message : "An unknown error occurred",
+          variant: "destructive",
         })
       }
-    })
+    },
+    [deleteDocument, toast],
+  )
 
-    setProcessingDocuments(currentlyProcessing)
-
-    // If we have processing documents, poll for updates
-    if (currentlyProcessing.size > 0) {
-      const pollInterval = setInterval(() => {
-        refreshDocuments()
-      }, 5000) // Poll every 5 seconds
-
-      return () => clearInterval(pollInterval)
-    }
-  }, [documents, processingTimeouts, addToast, refreshDocuments])
-
-  // Clean up timeouts on unmount
-  useEffect(() => {
-    return () => {
-      Object.values(processingTimeouts).forEach((timeout) => clearTimeout(timeout))
-    }
-  }, [processingTimeouts])
-
-  // Wrap retry handling in useCallback
-  const handleRetryProcessing = useCallback(async (documentId: string) => {
-    try {
-      console.log(`DocumentWidget: Initiating retry for document ${documentId}`);
-      
-      if (!retryDocumentProcessing || typeof retryDocumentProcessing !== 'function') {
-        console.error("retryDocumentProcessing is not a function:", retryDocumentProcessing);
-        addToast("Retry functionality not available", "error");
-        return;
+  const handleRetryProcessing = useCallback(
+    async (documentId: string) => {
+      try {
+        await retryProcessing(documentId)
+        toast({
+          title: "Processing restarted",
+          description: "Document processing has been restarted.",
+        })
+      } catch (error) {
+        console.error("Error retrying document processing:", error)
+        toast({
+          title: "Retry failed",
+          description: error instanceof Error ? error.message : "An unknown error occurred",
+          variant: "destructive",
+        })
       }
-      
-      await retryDocumentProcessing(documentId);
-      addToast("Document processing retry initiated", "success");
-      await refreshDocuments();
-    } catch (error) {
-      console.error("Retry error:", error);
-      const message = error instanceof Error ? error.message : "Unknown error occurred";
-      addToast("Failed to retry document processing: " + message, "error");
-    }
-  }, [retryDocumentProcessing, refreshDocuments, addToast]);
+    },
+    [retryProcessing, toast],
+  )
 
-  // Retry loading documents if there was an error
-  const handleRetry = () => {
-    setErrorMessage(null)
-    refreshDocuments()
-  }
-
-  // Ensure documents is always an array
-  const safeDocuments = Array.isArray(documents) ? documents : []
-  // Get the recent documents safely
-  const recentDocuments = safeDocuments.slice(0, limit)
-
-  const handleUploadClick = () => {
-    fileInputRef.current?.click()
-  }
-
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-
-    // Validate file type
-    if (file.type !== "text/plain" && !file.name.endsWith(".txt")) {
-      setErrorMessage("Only .txt files are supported")
-      addToast("Only .txt files are supported", "error")
-      if (fileInputRef.current) {
-        fileInputRef.current.value = ""
-      }
-      return
-    }
-
-    // Validate file size (max 10MB)
-    if (file.size > 10 * 1024 * 1024) {
-      setErrorMessage("File size must be less than 10MB")
-      addToast("File size must be less than 10MB", "error")
-      if (fileInputRef.current) {
-        fileInputRef.current.value = ""
-      }
-      return
-    }
-
-    try {
-      setIsUploading(true)
-      setErrorMessage(null)
-
-      const document = await uploadDocument(file, (progress) => {
-        console.log(`Upload progress: ${progress}%`)
-      })
-
-      // Add validation here
-      console.log("Document widget upload response:", document)
-      if (!document?.id) {
-        throw new Error("Document upload failed: Missing document ID in response")
-      }
-
-      addToast("Document uploaded successfully and processing started", "success")
-
-      // Refresh documents to show the new one
-      refreshDocuments()
-    } catch (error) {
-      console.error("Upload error:", error)
-      const message = error instanceof Error ? error.message : "Unknown error occurred"
-      setErrorMessage(`Failed to upload: ${message}`)
-      addToast("Failed to upload document: " + message, "error")
-    } finally {
-      setIsUploading(false)
-      // Reset the file input
-      if (fileInputRef.current) {
-        fileInputRef.current.value = ""
-      }
-    }
-  }
-
-  const getStatusIcon = (status: Document["status"]) => {
-    switch (status) {
-      case "indexed":
-        return <CheckCircle className="h-5 w-5 text-green-500" title="Indexed" />
-      case "failed":
-        return <AlertCircle className="h-5 w-5 text-red-500" title="Failed" />
-      case "processing":
-        return (
-          <div
-            className="h-5 w-5 rounded-full border-2 border-blue-500 border-t-transparent animate-spin"
-            title="Processing"
-          ></div>
-        )
-      default:
-        return <HelpCircle className="h-5 w-5 text-gray-500" title="Unknown status" />
-    }
-  }
-
-  const handleDeleteDocument = async (documentId: string) => {
-    try {
-      await deleteDocument(documentId)
-      addToast("Document deleted successfully", "success")
-      refreshDocuments()
-
-      // If the deleted document was selected, clear the selection
-      if (selectedDocument?.id === documentId) {
-        setSelectedDocument(null)
-        setShowDebugPanel(false)
-      }
-    } catch (error) {
-      console.error("Delete error:", error)
-      const message = error instanceof Error ? error.message : "Unknown error occurred"
-      addToast("Failed to delete document: " + message, "error")
-    }
-  }
-
-  const handleDebugDocument = (document: Document) => {
-    setSelectedDocument(document)
-    setShowDebugPanel(true)
-  }
+  const handleViewDocument = useCallback((document: Document) => {
+    // Check if document has a blob_url property
+    const fileUrl = document.blob_url || `/api/documents/file?path=${encodeURIComponent(document.file_path)}`
+    window.open(fileUrl, "_blank")
+  }, [])
 
   return (
-    <DashboardCard title="Documents" description="Recently uploaded documents" isLoading={isLoading && !isUploading}>
-      <div className="space-y-4">
-        {errorMessage && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md mb-4">
-            <div className="flex items-center">
-              <AlertCircle className="h-5 w-5 mr-2" />
-              <span>{errorMessage}</span>
-            </div>
-            <button onClick={handleRetry} className="mt-2 text-sm text-red-700 hover:text-red-900 underline">
-              Retry
-            </button>
-          </div>
-        )}
-
-        <button
-          onClick={handleUploadClick}
-          disabled={isUploading}
-          className="w-full flex items-center justify-center px-4 py-2 border border-dashed border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-        >
-          {isUploading ? (
-            <>
-              <div className="animate-spin mr-2 h-4 w-4 border-2 border-gray-500 border-t-transparent rounded-full"></div>
-              Uploading...
-            </>
-          ) : (
-            <>
+    <DashboardCard>
+      <CardHeader>
+        <CardTitle className="text-xl font-semibold">Documents</CardTitle>
+        <CardDescription>Upload and manage your documents</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="mb-4">
+          <div className="flex items-center gap-2">
+            <Button onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="w-full sm:w-auto">
               <Upload className="mr-2 h-4 w-4" />
               Upload Document
-            </>
+            </Button>
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileChange}
+              className="hidden"
+              accept=".txt,.md,.csv"
+            />
+          </div>
+          {isUploading && (
+            <div className="mt-2">
+              <Progress value={uploadProgress} className="h-2" />
+              <p className="mt-1 text-xs text-gray-500">Uploading and processing: {uploadProgress}%</p>
+            </div>
           )}
-        </button>
-        <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept=".txt" />
+        </div>
 
-        {processingDocuments.size > 0 && (
-          <div className="bg-blue-50 border border-blue-200 text-blue-700 px-4 py-3 rounded-md">
-            <div className="flex items-center">
-              <div className="animate-spin mr-2 h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full"></div>
-              <span>Processing {processingDocuments.size} document(s)...</span>
+        {error && (
+          <div className="mb-4 rounded-md bg-red-50 p-4 text-red-800">
+            <div className="flex">
+              <AlertCircle className="mr-2 h-5 w-5" />
+              <p>Error loading documents: {error}</p>
             </div>
           </div>
         )}
 
-        {recentDocuments.length > 0 ? (
-          <ul className="divide-y divide-gray-200">
-            {recentDocuments.map((doc) => (
-              <li key={doc.id} className="py-3 flex justify-between items-center">
-                <div className="flex items-center">
-                  <FileText className="h-5 w-5 text-gray-400 mr-3" />
-                  <div>
-                    <p className="text-sm font-medium text-gray-900 truncate max-w-[200px]">{doc.name}</p>
-                    <p className="text-xs text-gray-500">
-                      {formatFileSize(doc.file_size)} • {formatDate(doc.created_at)}
-                      {doc.status === "processing" && doc.processing_progress !== undefined && (
-                        <span className="ml-2 text-blue-500">{Math.round(doc.processing_progress)}%</span>
-                      )}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center space-x-2">
-                  {getStatusIcon(doc.status)}
-                  <button
-                    onClick={() => handleDebugDocument(doc)}
-                    className="text-blue-500 hover:text-blue-700"
-                    title="Debug document"
-                  >
-                    <Bug className="h-4 w-4" />
-                  </button>
-                  {doc.status !== "processing" && (
-                    <button
-                      onClick={() => handleDeleteDocument(doc.id)}
-                      className="text-red-500 hover:text-red-700"
-                      title="Delete document"
-                    >
-                      <Trash className="h-4 w-4" />
-                    </button>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
+        {isLoading ? (
+          <div className="flex justify-center py-8">
+            <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-t-2 border-gray-900"></div>
+          </div>
         ) : (
-          <div className="text-center py-4 text-gray-500">
-            {errorMessage
-              ? "Unable to load documents. Please try again."
-              : "No documents yet. Upload your first document to get started."}
+          <div className="space-y-4">
+            {documents.length === 0 ? (
+              <div className="rounded-md bg-gray-50 p-8 text-center">
+                <FileText className="mx-auto h-12 w-12 text-gray-400" />
+                <h3 className="mt-2 text-sm font-medium text-gray-900">No documents</h3>
+                <p className="mt-1 text-sm text-gray-500">Upload a document to get started.</p>
+              </div>
+            ) : (
+              documents.map((doc) => (
+                <Card key={doc.id} className="overflow-hidden">
+                  <CardContent className="p-0">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b p-4">
+                      <div className="mb-2 sm:mb-0">
+                        <h3 className="text-sm font-medium">{doc.name}</h3>
+                        <p className="text-xs text-gray-500">
+                          {formatFileSize(doc.file_size)} • {formatDate(doc.created_at)}
+                        </p>
+                      </div>
+                      <div className="flex items-center">
+                        {doc.status === "processing" ? (
+                          <div className="flex items-center text-amber-600">
+                            <Clock className="mr-1 h-4 w-4" />
+                            <span className="text-xs">Processing {doc.processing_progress || 0}%</span>
+                          </div>
+                        ) : doc.status === "indexed" ? (
+                          <div className="flex items-center text-green-600">
+                            <CheckCircle className="mr-1 h-4 w-4" />
+                            <span className="text-xs">Indexed</span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center text-red-600">
+                            <AlertCircle className="mr-1 h-4 w-4" />
+                            <span className="text-xs">Failed</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    {doc.status === "processing" && doc.processing_progress !== undefined && (
+                      <Progress value={doc.processing_progress} className="h-1 rounded-none" />
+                    )}
+                    {doc.status === "failed" && doc.error_message && (
+                      <div className="bg-red-50 p-3 text-xs text-red-800">
+                        <p className="font-medium">Error: {doc.error_message}</p>
+                      </div>
+                    )}
+                  </CardContent>
+                  <CardFooter className="flex justify-between p-2">
+                    <Button variant="ghost" size="sm" onClick={() => handleViewDocument(doc)}>
+                      <FileText className="mr-1 h-4 w-4" />
+                      View
+                    </Button>
+                    <div className="flex space-x-1">
+                      {doc.status === "failed" && (
+                        <Button variant="ghost" size="sm" onClick={() => handleRetryProcessing(doc.id)}>
+                          <RefreshCw className="mr-1 h-4 w-4" />
+                          Retry
+                        </Button>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-red-600 hover:bg-red-100 hover:text-red-700"
+                        onClick={() => handleDeleteDocument(doc.id)}
+                        disabled={doc.status === "processing"}
+                      >
+                        <Trash2 className="mr-1 h-4 w-4" />
+                        Delete
+                      </Button>
+                    </div>
+                  </CardFooter>
+                </Card>
+              ))
+            )}
           </div>
         )}
-
-        {showDebugPanel && selectedDocument && (
-          <div className="mt-4">
-            <h3 className="text-sm font-medium text-gray-700 mb-2">Document Debug Information</h3>
-            <DocumentDebug
-              document={selectedDocument}
-              onRetry={handleRetryProcessing}
-            />
-          </div>
-        )}
-      </div>
+      </CardContent>
     </DashboardCard>
   )
 }
