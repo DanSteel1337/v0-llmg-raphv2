@@ -20,7 +20,7 @@
 
 import { apiCall } from "./apiCall"
 import type { Document, AnalyticsData, Conversation, Message, SearchResult, SearchOptions } from "@/types"
-import { ProcessingStep } from "@/types"
+import { ProcessingStep } from "@/constants" // Import from constants.ts
 
 /**
  * Fetch documents for a user
@@ -198,6 +198,151 @@ export async function uploadDocument(userId: string, file: File): Promise<Docume
         `Failed to start document processing: ${error instanceof Error ? error.message : "Unknown error"}`,
       )
     }
+
+    return {
+      ...document,
+      blob_url: uploadResponse.blobUrl, // Add blob URL to document
+    }
+  } catch (error) {
+    console.error("Document upload pipeline failed:", error)
+    throw error
+  }
+}
+
+/**
+ * Upload a document with progress tracking
+ *
+ * @param userId User ID who owns the document
+ * @param file File to upload
+ * @param onProgress Optional callback for tracking upload progress
+ * @returns Uploaded document metadata
+ */
+export async function uploadDocumentWithProgress(
+  userId: string,
+  file: File,
+  onProgress?: (progress: number) => void,
+): Promise<Document> {
+  try {
+    // Validate inputs
+    if (!userId) throw new Error("User ID is required")
+    if (!file) throw new Error("File is required")
+
+    // Step 1: Create document metadata
+    console.log("Creating document metadata...", {
+      userId,
+      fileName: file.name,
+      fileType: file.type,
+      fileSize: file.size,
+    })
+
+    const createResponse = await apiCall<{ success: boolean; document: Document }>("/api/documents", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        userId,
+        name: file.name,
+        fileType: file.type || "text/plain",
+        fileSize: file.size,
+        filePath: `${userId}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, "_")}`,
+      }),
+    })
+
+    // Validate document response
+    if (!createResponse.success || !createResponse.document?.id || !createResponse.document?.file_path) {
+      console.error("Document creation failed - missing fields:", createResponse)
+      throw new Error("Document creation failed: Missing document ID or file path")
+    }
+
+    const document = createResponse.document
+    console.log("Document metadata created successfully:", {
+      documentId: document.id,
+      filePath: document.file_path,
+    })
+
+    // Call progress callback with 10% (metadata created)
+    if (onProgress) onProgress(10)
+
+    // Step 2: Upload the file content
+    console.log("Uploading file content...", {
+      documentId: document.id,
+      filePath: document.file_path,
+    })
+
+    const formData = new FormData()
+    formData.append("file", file)
+    formData.append("userId", userId)
+    formData.append("documentId", document.id)
+    formData.append("filePath", document.file_path)
+
+    const uploadResponse = await apiCall<{
+      success: boolean
+      documentId: string
+      fileUrl: string
+      blobUrl?: string
+    }>("/api/documents/upload", {
+      method: "POST",
+      body: formData,
+    })
+
+    if (!uploadResponse.success) {
+      console.error("File upload failed:", uploadResponse)
+      throw new Error("File upload failed")
+    }
+
+    // Call progress callback with 50% (file uploaded)
+    if (onProgress) onProgress(50)
+
+    // Get the file URL (prioritize blobUrl)
+    const fileUrl =
+      uploadResponse.blobUrl ||
+      uploadResponse.fileUrl ||
+      `/api/documents/file?path=${encodeURIComponent(document.file_path)}`
+
+    console.log("File uploaded successfully:", {
+      documentId: document.id,
+      fileUrl,
+    })
+
+    // Step 3: Process the document
+    console.log("Triggering document processing...", {
+      documentId: document.id,
+      fileUrl,
+    })
+
+    try {
+      const processResponse = await apiCall<{ success: boolean; status?: string }>("/api/documents/process", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          documentId: document.id,
+          userId,
+          filePath: document.file_path,
+          fileName: file.name,
+          fileType: file.type || "text/plain",
+          fileUrl,
+        }),
+      })
+
+      if (!processResponse.success) {
+        throw new Error(processResponse.error || "Document processing failed to start")
+      }
+
+      console.log("Document processing triggered:", {
+        documentId: document.id,
+        status: processResponse.status || "processing",
+      })
+
+      // Call progress callback with 75% (processing started)
+      if (onProgress) onProgress(75)
+    } catch (error) {
+      console.error("Error triggering document processing:", error)
+      throw new Error(
+        `Failed to start document processing: ${error instanceof Error ? error.message : "Unknown error"}`,
+      )
+    }
+
+    // Call progress callback with 100% (complete)
+    if (onProgress) onProgress(100)
 
     return {
       ...document,
@@ -519,5 +664,51 @@ export async function performSearch(
   } catch (error) {
     console.error("Error performing search:", error)
     throw error
+  }
+}
+
+/**
+ * Perform a search query (alias for performSearch)
+ *
+ * @param userId User ID performing the search
+ * @param query Search query
+ * @param options Optional search options
+ * @returns Search results
+ */
+export async function searchDocuments(
+  userId: string,
+  query: string,
+  options: SearchOptions = { type: "semantic" },
+): Promise<SearchResult[]> {
+  return performSearch(userId, query, options)
+}
+
+/**
+ * Fetch recent searches for a user
+ *
+ * @param userId User ID to fetch recent searches for
+ * @param limit Optional limit on number of searches to return
+ * @returns Array of recent search queries
+ */
+export async function getRecentSearches(userId: string, limit = 5): Promise<string[]> {
+  try {
+    if (!userId) {
+      console.error("getRecentSearches called without userId")
+      return []
+    }
+
+    const response = await apiCall<{ success: boolean; searches: string[] }>(
+      `/api/search/recent?userId=${encodeURIComponent(userId)}&limit=${limit}`,
+    )
+
+    if (!response || !response.success || !response.searches) {
+      console.warn("Received invalid response from recent searches API", { response })
+      return []
+    }
+
+    return Array.isArray(response.searches) ? response.searches : []
+  } catch (error) {
+    console.error("Error fetching recent searches:", error)
+    return []
   }
 }

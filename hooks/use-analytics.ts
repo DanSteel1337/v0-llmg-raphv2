@@ -1,126 +1,117 @@
 /**
  * Analytics Hook
  *
- * Custom hook for fetching and managing analytics data.
- * Provides functionality for retrieving analytics metrics,
- * checking API health status, and refresh capabilities.
- *
- * Features:
- * - Analytics data retrieval (documents, searches, chats)
- * - API health monitoring
- * - Automatic refresh on mount
- * - Manual refresh capability
- * - Error handling and loading states
+ * Custom hook for fetching and managing analytics data, including
+ * document counts, search metrics, and API health status.
  *
  * Dependencies:
  * - @/services/client-api-service for API calls
- * - @/types for analytics data types
- *
- * @module hooks/use-analytics
+ * - @/components/toast for notifications
  */
 
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
 import { fetchAnalytics, checkApiHealth } from "@/services/client-api-service"
-import type { AnalyticsData } from "@/types"
-import { useToastAdapter } from "@/components/toast-adapter"
+import type { AnalyticsData, ApiHealthStatus } from "@/types"
+import { useToast } from "@/components/toast"
 
-/**
- * Hook for analytics functionality
- * @param userId User ID for the current user
- * @returns Analytics state and methods
- */
-export function useAnalytics(userId: string) {
+export function useAnalytics(userId?: string) {
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<Error | null>(null)
+
+  // API health status
   const [pineconeApiHealthy, setPineconeApiHealthy] = useState<boolean | null>(null)
   const [openaiApiHealthy, setOpenaiApiHealthy] = useState<boolean | null>(null)
   const [isCheckingHealth, setIsCheckingHealth] = useState(false)
-  const [healthErrors, setHealthErrors] = useState<{
-    pinecone?: string | null
-    openai?: string | null
-  }>({})
-  const { toast } = useToastAdapter()
+  const [healthErrors, setHealthErrors] = useState<Record<string, string | null>>({
+    pinecone: null,
+    openai: null,
+  })
 
-  /**
-   * Load analytics data
-   */
-  const loadAnalytics = useCallback(async () => {
+  const { addToast } = useToast()
+
+  // Fetch analytics data
+  const refreshAnalytics = useCallback(async () => {
     if (!userId) return
 
     try {
       setIsLoading(true)
       setError(null)
+
+      // Fetch analytics data
       const data = await fetchAnalytics(userId)
       setAnalytics(data)
+
+      // Check API health
+      await checkHealth()
     } catch (err) {
-      console.error("Error loading analytics:", err)
-      setError(err instanceof Error ? err : new Error(String(err)))
-      toast("Failed to load analytics data", "error")
+      console.error("Error fetching analytics:", err)
+      const error = err instanceof Error ? err : new Error("Failed to load analytics")
+      setError(error)
+      addToast(`Failed to load analytics: ${error.message}`, "error")
     } finally {
       setIsLoading(false)
     }
-  }, [userId, toast])
+  }, [userId, addToast])
 
-  /**
-   * Check health of backend services
-   */
+  // Check API health
   const checkHealth = useCallback(async () => {
     try {
       setIsCheckingHealth(true)
       setPineconeApiHealthy(null)
       setOpenaiApiHealthy(null)
+      setHealthErrors({
+        pinecone: null,
+        openai: null,
+      })
 
-      const health = await checkApiHealth()
+      const healthStatus: ApiHealthStatus = await checkApiHealth()
+      console.log("Health check results:", healthStatus)
 
-      // Log the health check results for debugging
-      console.log("Health check results:", health)
+      setPineconeApiHealthy(healthStatus.pinecone.healthy)
+      setOpenaiApiHealthy(healthStatus.openai.healthy)
 
-      setPineconeApiHealthy(health.pineconeApiHealthy)
-      setOpenaiApiHealthy(health.openaiApiHealthy)
-      setHealthErrors(health.errors || {})
+      setHealthErrors({
+        pinecone: healthStatus.pinecone.error,
+        openai: healthStatus.openai.error,
+      })
 
-      // If there are errors, log them for debugging
-      if (health.errors?.pinecone) {
-        console.error("Pinecone health check error:", health.errors.pinecone)
-        toast("Pinecone API health check failed", "error")
+      // Show toast for unhealthy APIs
+      if (!healthStatus.pinecone.healthy && healthStatus.pinecone.error) {
+        addToast(`Pinecone API issue: ${healthStatus.pinecone.error}`, "warning")
       }
-      if (health.errors?.openai) {
-        console.error("OpenAI health check error:", health.errors.openai)
-        toast("OpenAI API health check failed", "error")
+
+      if (!healthStatus.openai.healthy && healthStatus.openai.error) {
+        addToast(`OpenAI API issue: ${healthStatus.openai.error}`, "warning")
       }
     } catch (err) {
       console.error("Error checking API health:", err)
-      setPineconeApiHealthy(false)
-      setOpenaiApiHealthy(false)
-      toast("API health check failed", "error")
+      const error = err instanceof Error ? err : new Error("Failed to check API health")
+      addToast(`Failed to check API health: ${error.message}`, "error")
     } finally {
       setIsCheckingHealth(false)
     }
-  }, [toast])
+  }, [addToast])
 
-  /**
-   * Refresh analytics data and check API health
-   */
-  const refreshAnalytics = useCallback(async () => {
-    await Promise.all([loadAnalytics(), checkHealth()])
-  }, [loadAnalytics, checkHealth])
-
-  // Initial load on mount
+  // Initial fetch
   useEffect(() => {
-    refreshAnalytics()
-  }, [refreshAnalytics])
+    if (userId) {
+      refreshAnalytics()
+    }
+  }, [userId, refreshAnalytics])
 
   return {
     analytics,
     isLoading,
     error,
     refreshAnalytics,
+
     pineconeApiHealthy,
     openaiApiHealthy,
     isCheckingHealth,
     healthErrors,
+    checkHealth,
   }
 }
