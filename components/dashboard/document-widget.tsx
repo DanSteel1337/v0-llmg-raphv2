@@ -1,384 +1,245 @@
-/**
- * Document Widget Component
- *
- * A dashboard widget for document management, allowing users to upload,
- * view, and delete documents. Shows document processing status and
- * provides detailed information about each document.
- *
- * Dependencies:
- * - @/components/ui/dashboard-card for layout
- * - @/hooks/use-documents for document data and operations
- */
-
 "use client"
 
-import { useState, useRef } from "react"
 import type React from "react"
-import {
-  FileText,
-  Upload,
-  Trash2,
-  AlertCircle,
-  RefreshCw,
-  ChevronDown,
-  ChevronUp,
-  CheckCircle,
-  XCircle,
-  AlertTriangle,
-  RotateCw,
-  Info,
-  FileQuestion,
-} from "lucide-react"
-import { DashboardCard } from "@/components/ui/dashboard-card"
-import { useToast } from "@/components/toast"
+
+import { useState, useCallback, useRef } from "react"
+import { Trash2, Upload, RefreshCw, AlertCircle, FileText, CheckCircle, Clock } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import { Progress } from "@/components/ui/progress"
+import { useToast } from "@/components/ui/use-toast"
 import { useDocuments } from "@/hooks/use-documents"
-import { formatDate, formatFileSize } from "@/utils/formatting"
-import { DocumentDebug } from "./document-debug"
+import { formatFileSize, formatDate } from "@/utils/formatting"
+import { DashboardCard } from "@/components/ui/dashboard-card"
 import type { Document } from "@/types"
 
-interface DocumentWidgetProps {
-  userId: string
-}
-
-export function DocumentWidget({ userId }: DocumentWidgetProps) {
+export function DocumentWidget() {
+  const { documents, isLoading, error, uploadDocument, deleteDocument, retryProcessing } = useDocuments()
+  const { toast } = useToast()
   const [isUploading, setIsUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
-  const [selectedFile, setSelectedFile] = useState<File | null>(null)
-  const [showDebug, setShowDebug] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const { addToast } = useToast()
 
-  console.log("Toast initialization result:", useToast())
-  console.log("Toast function type:", typeof useToast().toast)
+  const handleFileChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0]
+      if (!file) return
 
-  const {
-    documents,
-    isLoading,
-    error,
-    uploadDocument,
-    deleteDocument,
-    refreshDocuments,
-    retryProcessing,
-    processingStatus,
-  } = useDocuments(userId)
-
-  // Handle file selection
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files
-    if (files && files.length > 0) {
-      setSelectedFile(files[0])
-    }
-  }
-
-  // Handle file upload
-  const handleUpload = async () => {
-    if (!selectedFile) {
-      addToast("Please select a file to upload", "warning")
-      return
-    }
-
-    // Check if file is a text file
-    if (selectedFile.type !== "text/plain") {
-      addToast("Only .txt files are supported at this time", "error")
-      return
-    }
-
-    // Check file size (limit to 10MB)
-    if (selectedFile.size > 10 * 1024 * 1024) {
-      addToast("File size exceeds the 10MB limit", "error")
-      return
-    }
-
-    setIsUploading(true)
-    setUploadProgress(0)
-
-    try {
-      // Upload the document with progress tracking
-      await uploadDocument(selectedFile, (progress) => {
-        setUploadProgress(progress)
-      })
-
-      addToast("Your document has been uploaded and is being processed.", "success")
-      setSelectedFile(null)
-      if (fileInputRef.current) {
-        fileInputRef.current.value = ""
+      // Validate file type - only accept text files for now
+      if (!file.type.includes("text/")) {
+        toast({
+          title: "Invalid file type",
+          description: "Only text files are supported at this time.",
+          variant: "destructive",
+        })
+        return
       }
-    } catch (error) {
-      console.error("Upload error:", error)
-      addToast(`Failed to upload document: ${error instanceof Error ? error.message : "Unknown error"}`, "error")
-    } finally {
-      setIsUploading(false)
+
+      // Validate file size - max 10MB
+      if (file.size > 10 * 1024 * 1024) {
+        toast({
+          title: "File too large",
+          description: "Maximum file size is 10MB.",
+          variant: "destructive",
+        })
+        return
+      }
+
+      setIsUploading(true)
       setUploadProgress(0)
-    }
-  }
 
-  // Handle document deletion
-  const handleDelete = async (documentId: string) => {
-    if (!window.confirm("Are you sure you want to delete this document? This action cannot be undone.")) {
-      return
-    }
+      try {
+        await uploadDocument(file, (progress) => {
+          setUploadProgress(progress)
+        })
 
-    try {
-      await deleteDocument(documentId)
-      addToast("Document deleted successfully", "success")
-    } catch (error) {
-      console.error("Delete error:", error)
-      addToast(`Failed to delete document: ${error instanceof Error ? error.message : "Unknown error"}`, "error")
-    }
-  }
+        toast({
+          title: "Document uploaded",
+          description: "Your document has been uploaded and is being processed.",
+        })
+      } catch (error) {
+        console.error("Error uploading document:", error)
+        toast({
+          title: "Upload failed",
+          description: error instanceof Error ? error.message : "An unknown error occurred",
+          variant: "destructive",
+        })
+      } finally {
+        setIsUploading(false)
+        setUploadProgress(0)
+        if (fileInputRef.current) {
+          fileInputRef.current.value = ""
+        }
+      }
+    },
+    [uploadDocument, toast],
+  )
 
-  // Handle retry processing
-  const handleRetry = async (documentId: string) => {
-    try {
-      await retryProcessing(documentId)
-      addToast("Document processing restarted", "info")
-    } catch (error) {
-      console.error("Retry error:", error)
-      addToast(`Failed to restart processing: ${error instanceof Error ? error.message : "Unknown error"}`, "error")
-    }
-  }
+  const handleDeleteDocument = useCallback(
+    async (documentId: string) => {
+      try {
+        await deleteDocument(documentId)
+        toast({
+          title: "Document deleted",
+          description: "The document has been removed from your library.",
+        })
+      } catch (error) {
+        console.error("Error deleting document:", error)
+        toast({
+          title: "Delete failed",
+          description: error instanceof Error ? error.message : "An unknown error occurred",
+          variant: "destructive",
+        })
+      }
+    },
+    [deleteDocument, toast],
+  )
 
-  // Toggle debug view
-  const toggleDebug = (documentId: string) => {
-    setShowDebug(showDebug === documentId ? null : documentId)
-  }
+  const handleRetryProcessing = useCallback(
+    async (documentId: string) => {
+      try {
+        await retryProcessing(documentId)
+        toast({
+          title: "Processing restarted",
+          description: "Document processing has been restarted.",
+        })
+      } catch (error) {
+        console.error("Error retrying document processing:", error)
+        toast({
+          title: "Retry failed",
+          description: error instanceof Error ? error.message : "An unknown error occurred",
+          variant: "destructive",
+        })
+      }
+    },
+    [retryProcessing, toast],
+  )
 
-  // Get status badge styling
-  const getStatusBadge = (status: string, progress?: number) => {
-    switch (status) {
-      case "indexed":
-        return (
-          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-            <CheckCircle className="w-3 h-3 mr-1" />
-            Indexed
-          </span>
-        )
-      case "processing":
-        return (
-          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-            {typeof progress === "number" && progress > 0 ? (
-              <>
-                <RefreshCw className="w-3 h-3 mr-1 animate-spin" />
-                Processing {progress}%
-              </>
-            ) : (
-              <>
-                <RefreshCw className="w-3 h-3 mr-1 animate-spin" />
-                Processing
-              </>
-            )}
-          </span>
-        )
-      case "failed":
-        return (
-          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
-            <XCircle className="w-3 h-3 mr-1" />
-            Failed
-          </span>
-        )
-      case "stalled":
-        return (
-          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-            <AlertTriangle className="w-3 h-3 mr-1" />
-            Stalled
-          </span>
-        )
-      default:
-        return (
-          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-            <FileQuestion className="w-3 h-3 mr-1" />
-            {status}
-          </span>
-        )
-    }
-  }
-
-  // Check if a document is stalled (processing for too long)
-  const isDocumentStalled = (document: Document) => {
-    if (document.status !== "processing") return false
-
-    // If the document has been processing for more than 5 minutes, consider it stalled
-    const processingTime = Date.now() - new Date(document.updated_at).getTime()
-    return processingTime > 5 * 60 * 1000 // 5 minutes in milliseconds
-  }
-
-  // Get document status with stalled detection
-  const getDocumentStatus = (document: Document) => {
-    if (isDocumentStalled(document)) {
-      return "stalled"
-    }
-    return document.status
-  }
-
-  // Get processing progress for a document
-  const getProcessingProgress = (documentId: string) => {
-    return processingStatus[documentId]?.progress || 0
-  }
+  const handleViewDocument = useCallback((document: Document) => {
+    // Check if document has a blob_url property
+    const fileUrl = document.blob_url || `/api/documents/file?path=${encodeURIComponent(document.file_path)}`
+    window.open(fileUrl, "_blank")
+  }, [])
 
   return (
-    <DashboardCard title="Documents" description="Upload and manage your documents" isLoading={isLoading}>
-      <div className="space-y-6">
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md mb-4">
-            <div className="flex items-center">
-              <AlertCircle className="h-5 w-5 mr-2" />
-              <span>{error instanceof Error ? error.message : String(error)}</span>
+    <DashboardCard>
+      <CardHeader>
+        <CardTitle className="text-xl font-semibold">Documents</CardTitle>
+        <CardDescription>Upload and manage your documents</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="mb-4">
+          <div className="flex items-center gap-2">
+            <Button onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="w-full sm:w-auto">
+              <Upload className="mr-2 h-4 w-4" />
+              Upload Document
+            </Button>
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileChange}
+              className="hidden"
+              accept=".txt,.md,.csv"
+            />
+          </div>
+          {isUploading && (
+            <div className="mt-2">
+              <Progress value={uploadProgress} className="h-2" />
+              <p className="mt-1 text-xs text-gray-500">Uploading and processing: {uploadProgress}%</p>
             </div>
-            <button onClick={refreshDocuments} className="mt-2 text-sm text-red-700 hover:text-red-900 underline">
-              Retry
-            </button>
+          )}
+        </div>
+
+        {error && (
+          <div className="mb-4 rounded-md bg-red-50 p-4 text-red-800">
+            <div className="flex">
+              <AlertCircle className="mr-2 h-5 w-5" />
+              <p>Error loading documents: {error}</p>
+            </div>
           </div>
         )}
 
-        {/* Upload Section */}
-        <div className="bg-gray-50 p-4 rounded-lg">
-          <h3 className="text-sm font-medium text-gray-700 mb-2">Upload Document</h3>
-          <div className="space-y-3">
-            <div className="flex items-center">
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={handleFileChange}
-                className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-                accept=".txt"
-                disabled={isUploading}
-              />
-              <button
-                onClick={handleUpload}
-                disabled={!selectedFile || isUploading}
-                className="ml-3 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isUploading ? (
-                  <>
-                    <RefreshCw className="animate-spin -ml-1 mr-2 h-4 w-4" />
-                    Uploading...
-                  </>
-                ) : (
-                  <>
-                    <Upload className="-ml-1 mr-2 h-4 w-4" />
-                    Upload
-                  </>
-                )}
-              </button>
-            </div>
-
-            {selectedFile && (
-              <div className="text-xs text-gray-500">
-                Selected file: {selectedFile.name} ({formatFileSize(selectedFile.size)})
-              </div>
-            )}
-
-            {isUploading && (
-              <div className="w-full bg-gray-200 rounded-full h-2.5">
-                <div
-                  className="bg-blue-600 h-2.5 rounded-full"
-                  style={{ width: `${uploadProgress}%` }}
-                  aria-valuenow={uploadProgress}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                ></div>
-              </div>
-            )}
-
-            <div className="text-xs text-gray-500 flex items-start">
-              <Info className="h-3 w-3 mr-1 mt-0.5 flex-shrink-0" />
-              <span>
-                Currently only supporting .txt files. Documents will be processed and made available for search and
-                chat.
-              </span>
-            </div>
+        {isLoading ? (
+          <div className="flex justify-center py-8">
+            <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-t-2 border-gray-900"></div>
           </div>
-        </div>
-
-        {/* Documents List */}
-        {documents && documents.length > 0 ? (
-          <ul className="divide-y divide-gray-200">
-            {documents.map((document) => {
-              const status = getDocumentStatus(document)
-              const progress = getProcessingProgress(document.id)
-
-              return (
-                <li key={document.id} className="py-4">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-start space-x-3">
-                      <div className="flex-shrink-0 pt-1">
-                        <FileText className="h-6 w-6 text-gray-400" />
+        ) : (
+          <div className="space-y-4">
+            {documents.length === 0 ? (
+              <div className="rounded-md bg-gray-50 p-8 text-center">
+                <FileText className="mx-auto h-12 w-12 text-gray-400" />
+                <h3 className="mt-2 text-sm font-medium text-gray-900">No documents</h3>
+                <p className="mt-1 text-sm text-gray-500">Upload a document to get started.</p>
+              </div>
+            ) : (
+              documents.map((doc) => (
+                <Card key={doc.id} className="overflow-hidden">
+                  <CardContent className="p-0">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b p-4">
+                      <div className="mb-2 sm:mb-0">
+                        <h3 className="text-sm font-medium">{doc.name}</h3>
+                        <p className="text-xs text-gray-500">
+                          {formatFileSize(doc.file_size)} • {formatDate(doc.created_at)}
+                        </p>
                       </div>
-                      <div>
-                        <h4 className="text-sm font-medium text-gray-900">{document.name}</h4>
-                        <div className="mt-1 flex items-center text-xs text-gray-500">
-                          <span>{formatFileSize(document.file_size)}</span>
-                          <span className="mx-1">•</span>
-                          <span>{formatDate(document.created_at)}</span>
-                          <span className="mx-1">•</span>
-                          <span>
-                            {document.chunk_count !== undefined && document.chunk_count > 0
-                              ? `${document.chunk_count} chunks`
-                              : "Processing..."}
-                          </span>
-                        </div>
-                        <div className="mt-2">{getStatusBadge(status, progress)}</div>
-
-                        {document.error_message && (
-                          <div className="mt-2 text-xs text-red-600 flex items-start">
-                            <AlertCircle className="h-3 w-3 mr-1 mt-0.5 flex-shrink-0" />
-                            <span className="line-clamp-2">{document.error_message}</span>
+                      <div className="flex items-center">
+                        {doc.status === "processing" ? (
+                          <div className="flex items-center text-amber-600">
+                            <Clock className="mr-1 h-4 w-4" />
+                            <span className="text-xs">Processing {doc.processing_progress || 0}%</span>
+                          </div>
+                        ) : doc.status === "indexed" ? (
+                          <div className="flex items-center text-green-600">
+                            <CheckCircle className="mr-1 h-4 w-4" />
+                            <span className="text-xs">Indexed</span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center text-red-600">
+                            <AlertCircle className="mr-1 h-4 w-4" />
+                            <span className="text-xs">Failed</span>
                           </div>
                         )}
                       </div>
                     </div>
-
-                    <div className="flex space-x-2">
-                      {status === "failed" && (
-                        <button
-                          onClick={() => handleRetry(document.id)}
-                          className="inline-flex items-center p-1 border border-transparent rounded-full shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                          title="Retry processing"
-                        >
-                          <RotateCw className="h-4 w-4" />
-                        </button>
+                    {doc.status === "processing" && doc.processing_progress !== undefined && (
+                      <Progress value={doc.processing_progress} className="h-1 rounded-none" />
+                    )}
+                    {doc.status === "failed" && doc.error_message && (
+                      <div className="bg-red-50 p-3 text-xs text-red-800">
+                        <p className="font-medium">Error: {doc.error_message}</p>
+                      </div>
+                    )}
+                  </CardContent>
+                  <CardFooter className="flex justify-between p-2">
+                    <Button variant="ghost" size="sm" onClick={() => handleViewDocument(doc)}>
+                      <FileText className="mr-1 h-4 w-4" />
+                      View
+                    </Button>
+                    <div className="flex space-x-1">
+                      {doc.status === "failed" && (
+                        <Button variant="ghost" size="sm" onClick={() => handleRetryProcessing(doc.id)}>
+                          <RefreshCw className="mr-1 h-4 w-4" />
+                          Retry
+                        </Button>
                       )}
-
-                      <button
-                        onClick={() => toggleDebug(document.id)}
-                        className="inline-flex items-center p-1 border border-gray-300 rounded-full shadow-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                        title="Show debug information"
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-red-600 hover:bg-red-100 hover:text-red-700"
+                        onClick={() => handleDeleteDocument(doc.id)}
+                        disabled={doc.status === "processing"}
                       >
-                        {showDebug === document.id ? (
-                          <ChevronUp className="h-4 w-4" />
-                        ) : (
-                          <ChevronDown className="h-4 w-4" />
-                        )}
-                      </button>
-
-                      <button
-                        onClick={() => handleDelete(document.id)}
-                        className="inline-flex items-center p-1 border border-transparent rounded-full shadow-sm text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
-                        title="Delete document"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                        <Trash2 className="mr-1 h-4 w-4" />
+                        Delete
+                      </Button>
                     </div>
-                  </div>
-
-                  {/* Debug Information */}
-                  {showDebug === document.id && (
-                    <div className="mt-4">
-                      <DocumentDebug document={document} onRetry={handleRetry} />
-                    </div>
-                  )}
-                </li>
-              )
-            })}
-          </ul>
-        ) : (
-          <div className="text-center py-8">
-            <FileText className="mx-auto h-12 w-12 text-gray-400" />
-            <h3 className="mt-2 text-sm font-medium text-gray-900">No documents</h3>
-            <p className="mt-1 text-sm text-gray-500">Get started by uploading a document.</p>
+                  </CardFooter>
+                </Card>
+              ))
+            )}
           </div>
         )}
-      </div>
+      </CardContent>
     </DashboardCard>
   )
 }

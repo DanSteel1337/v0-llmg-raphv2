@@ -37,73 +37,6 @@ function isInformativeChunk(text: string): boolean {
 }
 
 /**
- * Detects if a position is inside a fenced code block
- * @param text The full text
- * @param position The position to check
- * @returns True if the position is inside a code block
- */
-function isInsideCodeBlock(text: string, position: number): boolean {
-  // Look for code fence markers (\`\`\`) before the position
-  const textBeforePosition = text.substring(0, position)
-  const fenceMatches = textBeforePosition.match(/```/g)
-
-  // If we have no fence markers or an even number, we're not in a code block
-  if (!fenceMatches || fenceMatches.length % 2 === 0) {
-    return false
-  }
-
-  // If we have an odd number of fence markers, we're inside a code block
-  return true
-}
-
-/**
- * Detects if a position is inside an indented code block
- * @param text The full text
- * @param position The position to check
- * @returns True if the position is inside an indented code block
- */
-function isInsideIndentedCodeBlock(text: string, position: number): boolean {
-  // Find the start of the line containing the position
-  const lineStart = text.lastIndexOf("\n", position - 1) + 1
-  const line = text.substring(lineStart, text.indexOf("\n", position) || text.length)
-
-  // Check if the line starts with 4 spaces or a tab
-  return line.startsWith("    ") || line.startsWith("\t")
-}
-
-/**
- * Finds the end of a code block starting from a position
- * @param text The full text
- * @param position The starting position (inside a code block)
- * @returns The position of the end of the code block
- */
-function findCodeBlockEnd(text: string, position: number): number {
-  // For fenced code blocks
-  if (isInsideCodeBlock(text, position)) {
-    const nextFence = text.indexOf("```", position)
-    return nextFence !== -1 ? nextFence + 3 : text.length
-  }
-
-  // For indented code blocks, find where indentation ends
-  if (isInsideIndentedCodeBlock(text, position)) {
-    const lines = text.substring(position).split("\n")
-    let endPos = position
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i]
-      if (i > 0 && !(line.startsWith("    ") || line.startsWith("\t") || line.trim() === "")) {
-        break
-      }
-      endPos += lines[i].length + 1 // +1 for the newline
-    }
-
-    return endPos
-  }
-
-  return position
-}
-
-/**
  * Split a document into chunks with optional overlap
  *
  * @param text The document text to chunk
@@ -145,44 +78,25 @@ export function chunkDocument(text: string, maxChunkSize = 1500, overlap = 150):
       break
     }
 
-    // Check if we're inside a code block at the potential end position
-    if (isInsideCodeBlock(normalizedText, endIndex) || isInsideIndentedCodeBlock(normalizedText, endIndex)) {
-      // Find the end of the code block
-      endIndex = findCodeBlockEnd(normalizedText, endIndex)
-
-      // If the code block is too large, we need to find a break point before it
-      if (endIndex - startIndex > maxChunkSize * 1.5) {
-        // Find the start of the code block
-        const codeBlockStart = normalizedText.lastIndexOf("```", endIndex - 1)
-        if (codeBlockStart > startIndex) {
-          // Use the position right before the code block starts
-          endIndex = codeBlockStart
-        } else {
-          // If we can't find a good break point, just use the max length
-          endIndex = startIndex + maxChunkSize
-        }
-      }
+    // Try to find a natural break point (paragraph, sentence, or word boundary)
+    // Look for paragraph break
+    let breakIndex = normalizedText.lastIndexOf("\n\n", endIndex)
+    if (breakIndex > startIndex && breakIndex > endIndex - 200) {
+      endIndex = breakIndex + 2 // Include the newlines
     } else {
-      // Try to find a natural break point (paragraph, sentence, or word boundary)
-      // Look for paragraph break
-      let breakIndex = normalizedText.lastIndexOf("\n\n", endIndex)
-      if (breakIndex > startIndex && breakIndex > endIndex - 200) {
-        endIndex = breakIndex + 2 // Include the newlines
-      } else {
-        // Look for sentence break (period followed by space or newline)
-        breakIndex = normalizedText.lastIndexOf(". ", endIndex)
-        if (breakIndex === -1) breakIndex = normalizedText.lastIndexOf(".\n", endIndex)
+      // Look for sentence break (period followed by space or newline)
+      breakIndex = normalizedText.lastIndexOf(". ", endIndex)
+      if (breakIndex === -1) breakIndex = normalizedText.lastIndexOf(".\n", endIndex)
 
-        if (breakIndex > startIndex && breakIndex > endIndex - 100) {
-          endIndex = breakIndex + 2 // Include the period and space/newline
-        } else {
-          // Fall back to word boundary
-          breakIndex = normalizedText.lastIndexOf(" ", endIndex)
-          if (breakIndex > startIndex) {
-            endIndex = breakIndex + 1 // Include the space
-          }
-          // If no good break point found, just use the max length
+      if (breakIndex > startIndex && breakIndex > endIndex - 100) {
+        endIndex = breakIndex + 2 // Include the period and space/newline
+      } else {
+        // Fall back to word boundary
+        breakIndex = normalizedText.lastIndexOf(" ", endIndex)
+        if (breakIndex > startIndex) {
+          endIndex = breakIndex + 1 // Include the space
         }
+        // If no good break point found, just use the max length
       }
     }
 

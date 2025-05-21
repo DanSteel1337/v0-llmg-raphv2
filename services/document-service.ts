@@ -291,13 +291,6 @@ export async function processDocumentAndEmbed({
     timings: {},
   }
 
-  // Set initial progress to ensure UI shows activity
-  await updateDocumentStatus(documentId, "processing", 5, "Starting document processing", {
-    ...debugInfo,
-    currentStep: "initialization",
-    processingStarted: true,
-  })
-
   try {
     // Validate required parameters
     if (!documentId) throw new Error("documentId is required")
@@ -412,18 +405,12 @@ export async function processDocumentAndEmbed({
       const errorMessage = `Failed to fetch document: ${fetchError || "Unknown error"}`
       logger.error(errorMessage, { documentId, fileUrl, retries })
 
-      // Update status with more detailed error information
       await updateDocumentStatus(documentId, "failed", 0, errorMessage, {
         ...debugInfo,
         error: errorMessage,
         failedStep: "fetch_content",
         processingEndTime: new Date().toISOString(),
         totalDuration: performance.now() - startTime,
-        networkDetails: {
-          attempts: retries + 1,
-          lastStatus: response?.status,
-          lastStatusText: response?.statusText,
-        },
       })
 
       return {
@@ -576,8 +563,7 @@ export async function processDocumentAndEmbed({
     for (let i = 0; i < chunks.length; i += EMBEDDING_BATCH_SIZE) {
       const batchStartTime = performance.now()
       const batch = chunks.slice(i, i + EMBEDDING_BATCH_SIZE)
-      // More granular progress updates with minimum progress of 10%
-      const batchProgress = Math.max(10, Math.floor(40 + (i / chunks.length) * 50))
+      const batchProgress = Math.floor(40 + (i / chunks.length) * 50)
       const batchNumber = Math.floor(i / EMBEDDING_BATCH_SIZE) + 1
       const totalBatches = Math.ceil(chunks.length / EMBEDDING_BATCH_SIZE)
 

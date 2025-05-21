@@ -10,7 +10,7 @@
  * - @/utils/apiRequest for standardized API responses
  * - @/utils/validation for input validation
  * - @/lib/embedding-service for generating embeddings
- * - @/lib/pinecone-rest-client for vector operations
+ * - @/lib/pinecone-client for vector operations
  * - @/lib/utils/logger for logging
  */
 
@@ -19,7 +19,7 @@ import { withErrorHandling } from "@/utils/errorHandling"
 import { handleApiRequest } from "@/utils/apiRequest"
 import { ValidationError } from "@/utils/validation"
 import { generateEmbedding } from "@/lib/embedding-service"
-import { queryVectors, createPlaceholderVector } from "@/lib/pinecone-rest-client"
+import { queryPineconeWithRetry, upsertVectorsWithRetry } from "@/lib/pinecone-client"
 import { logger } from "@/lib/utils/logger"
 
 // Ensure the Edge runtime is declared
@@ -68,9 +68,11 @@ export const GET = withErrorHandling(async (request: NextRequest) => {
 
       try {
         // Log search query for analytics
-        const placeholderVector = createPlaceholderVector()
+        const placeholderVector = Array(3072)
+          .fill(0)
+          .map(() => Math.random() * 0.001)
 
-        await queryVectors([
+        await upsertVectorsWithRetry([
           {
             id: `search_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
             values: placeholderVector,
@@ -124,7 +126,7 @@ export const GET = withErrorHandling(async (request: NextRequest) => {
           }
 
           // Query Pinecone
-          const response = await queryVectors(embedding, 10, true, filter)
+          const response = await queryPineconeWithRetry(embedding, 10, filter)
 
           // Format results
           if (response.matches && Array.isArray(response.matches)) {

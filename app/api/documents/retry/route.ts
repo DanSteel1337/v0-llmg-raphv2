@@ -3,19 +3,19 @@
  *
  * Handles retrying document processing for failed documents.
  * Provides functionality to retry processing when initial processing fails.
- *
+ * 
  * Features:
  * - Retry processing for failed documents
  * - Status tracking and updates
  * - Support for both blob-based and legacy path-based documents
  * - Proper error handling and recovery
- *
+ * 
  * Dependencies:
  * - @/utils/errorHandling for consistent error handling
  * - @/utils/apiRequest for standardized API responses
  * - @/lib/document-service for document operations
  * - @/lib/utils/logger for logging
- *
+ * 
  * @module app/api/documents/retry/route
  */
 
@@ -76,57 +76,25 @@ export const POST = withErrorHandling(async (request: NextRequest) => {
         fileType: document.file_type,
       })
 
-      // Process the document asynchronously - but handle errors properly
-      try {
-        // Start processing in the background
-        processDocument({
+      // Process the document asynchronously
+      processDocument({
+        documentId,
+        userId: document.user_id,
+        filePath: document.file_path,
+        fileName: document.name,
+        fileType: document.file_type,
+        fileUrl,
+        isRetry: true,
+      }).catch((error) => {
+        logger.error(`POST /api/documents/retry - Error processing document`, {
           documentId,
-          userId: document.user_id,
-          filePath: document.file_path,
-          fileName: document.name,
-          fileType: document.file_type,
-          fileUrl,
-          isRetry: true,
-        }).catch((error) => {
-          logger.error(`POST /api/documents/retry - Error processing document`, {
-            documentId,
-            error: error instanceof Error ? error.message : "Unknown error",
-            stack: error instanceof Error ? error.stack : undefined,
-          })
-
-          // Update document status to failed if background processing fails
-          updateDocumentStatus(
-            documentId,
-            "failed",
-            0,
-            `Background processing failed: ${error instanceof Error ? error.message : "Unknown error"}`,
-          ).catch((statusError) => {
-            logger.error(`Failed to update document status after error:`, statusError)
-          })
+          error: error instanceof Error ? error.message : "Unknown error",
+          stack: error instanceof Error ? error.stack : undefined,
         })
+      })
 
-        logger.info(`POST /api/documents/retry - Document processing started`, { documentId })
-        return { success: true, status: "processing" }
-      } catch (processingError) {
-        // This catch block handles synchronous errors in starting the process
-        logger.error(`POST /api/documents/retry - Error starting document processing`, {
-          documentId,
-          error: processingError instanceof Error ? processingError.message : "Unknown error",
-        })
-
-        // Update document status to failed
-        await updateDocumentStatus(
-          documentId,
-          "failed",
-          0,
-          `Failed to start processing: ${processingError instanceof Error ? processingError.message : "Unknown error"}`,
-        )
-
-        return {
-          success: false,
-          error: `Failed to start document processing: ${processingError instanceof Error ? processingError.message : "Unknown error"}`,
-        }
-      }
+      logger.info(`POST /api/documents/retry - Document processing started`, { documentId })
+      return { success: true, status: "processing" }
     } catch (error) {
       logger.error(`POST /api/documents/retry - Error retrying document processing`, {
         documentId,

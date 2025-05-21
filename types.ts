@@ -4,18 +4,6 @@
  * Central location for type definitions used throughout the application.
  */
 
-// Document processing step - defined as an enum so it exists at runtime
-export enum ProcessingStep {
-  INITIALIZING = "initializing",
-  READING_FILE = "reading_file",
-  CHUNKING = "chunking",
-  EMBEDDING = "embedding",
-  INDEXING = "indexing",
-  FINALIZING = "finalizing",
-  COMPLETED = "completed",
-  FAILED = "failed",
-}
-
 // Document types
 export interface Document {
   id: string
@@ -27,7 +15,6 @@ export interface Document {
   file_path: string
   status: "created" | "processing" | "indexed" | "failed" // UPDATED: Added "created" status for backward compatibility
   processing_progress?: number
-  processing_step?: ProcessingStep // Reference to the enum
   error_message?: string
   created_at: string
   updated_at: string
@@ -93,6 +80,3 @@ export interface Message {
   role: "user" | "assistant"
   created_at: string
 }
-
-// Document status
-export type DocumentStatus = "processing" | "indexed" | "failed"

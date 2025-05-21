@@ -1,7 +1,16 @@
 /**
  * Type Definitions
  *
- * Central location for type definitions used throughout the application.
+ * Shared types used throughout the application.
+ * Provides consistent interfaces for documents, search, chats, analytics, etc.
+ *
+ * IMPORTANT:
+ * - ALWAYS use these shared types for consistency
+ * - NEVER modify the core fields without updating all usages
+ * - ALWAYS use the standard document status values: "processing", "indexed", "failed"
+ * - Document IDs should follow the format: doc_${timestamp}_${random}
+ *
+ * @module types/index
  */
 
 // Document types
@@ -13,26 +22,54 @@ export interface Document {
   file_type: string
   file_size: number
   file_path: string
-  status: "created" | "processing" | "indexed" | "failed"
+  blob_url?: string // Added for Vercel Blob integration
+  status: "processing" | "indexed" | "failed"
   processing_progress?: number
-  processing_step?: ProcessingStep
   error_message?: string
   created_at: string
   updated_at: string
   chunk_count?: number
   embedding_model?: string
+  debug_info?: Record<string, any>
 }
 
-// Document processing step - defined as an enum for type safety
-export enum ProcessingStep {
-  INITIALIZING = "initializing",
-  READING_FILE = "reading_file",
-  CHUNKING = "chunking",
-  EMBEDDING = "embedding",
-  INDEXING = "indexing",
-  FINALIZING = "finalizing",
-  COMPLETED = "completed",
-  FAILED = "failed",
+// Document processing options
+export interface ProcessDocumentOptions {
+  documentId: string
+  userId: string
+  filePath: string
+  fileName: string
+  fileType: string
+  fileUrl: string
+}
+
+// Chat message
+export interface ChatMessage {
+  id: string
+  conversation_id: string
+  role: "user" | "assistant" | "system"
+  content: string
+  created_at: string
+  sources?: string[]
+}
+
+// Message creation options
+export interface CreateMessageOptions {
+  conversationId: string
+  role: "user" | "assistant" | "system"
+  content: string
+  sources?: string[]
+  turnIndex?: number
+}
+
+// Conversation
+export interface Conversation {
+  id: string
+  user_id: string
+  title: string
+  created_at: string
+  updated_at: string
+  message_count: number
 }
 
 // Search options
@@ -60,75 +97,36 @@ export interface SearchResult {
 
 // Analytics data
 export interface AnalyticsData {
-  documents: number
-  chunks: number
-  searches: number
-  chats: number
-  processingStats?: {
-    avgProcessingTime: number
-    successRate: number
+  documentCount: number
+  chunkCount: number
+  searchCount: number
+  chatCount: number
+  topDocuments: Array<{
+    id: string
+    name: string
+    chunkCount: number
+    createdAt: string
+  }>
+  topSearches: Array<{
+    query: string
+    count: number
+    timestamp: string
+  }>
+  mightBeTruncated?: {
+    documents: boolean
+    chunks: boolean
+    searches: boolean
+    chats: boolean
   }
 }
 
-// Conversation
-export interface Conversation {
-  id: string
-  user_id: string
-  title: string
-  created_at: string
-  updated_at: string
-  message_count?: number
-}
-
-// Message
+// Message type
 export interface Message {
   id: string
   conversation_id: string
-  user_id: string
-  content: string
   role: "user" | "assistant"
-  created_at: string
-}
-
-// API Response
-export interface ApiResponse<T> {
-  success: boolean
-  data?: T
-  error?: string
-}
-
-// Document processing options
-export interface ProcessDocumentOptions {
-  documentId: string
-  userId: string
-  filePath: string
-  fileName: string
-  fileType: string
-  fileUrl: string
-  onProgress?: (progress: number, step?: ProcessingStep) => void
-}
-
-// Document chunk
-export interface DocumentChunk {
-  id: string
-  document_id: string
   content: string
-  metadata: {
-    document_name: string
-    document_type: string
-    chunk_index: number
-    total_chunks: number
-  }
-}
-
-// Toast types
-export type ToastType = "success" | "error" | "info" | "warning"
-
-// Toast message
-export interface ToastMessage {
-  id: string
-  type: ToastType
-  title?: string
-  description: string
-  duration?: number
+  created_at: string
+  sources?: string[]
+  metadata?: Record<string, any>
 }

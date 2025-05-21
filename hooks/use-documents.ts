@@ -1,141 +1,176 @@
 /**
- * Documents Hook
+ * Document Management Hook
  *
- * Custom hook for managing document operations including fetching, uploading,
- * deleting, and processing documents.
- *
+ * React hook for managing documents in the Vector RAG application.
+ * Provides functionality for fetching, uploading, deleting, and retrying document processing.
+ * 
+ * Features:
+ * - Document listing with automatic updating
+ * - Document upload with progress tracking
+ * - Document deletion with error handling
+ * - Processing retry for failed documents
+ * 
  * Dependencies:
- * - @/services/client-api-service for API calls
- * - @/components/toast for notifications
+ * - @/services/client-api-service for API interactions
+ * - @/hooks/use-auth for user session information
+ * - @/types for document interfaces
+ * 
+ * @module hooks/use-documents
  */
 
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import {
-  fetchDocuments,
-  uploadDocumentWithProgress,
-  deleteDocument as apiDeleteDocument,
-  retryDocumentProcessing,
-} from "@/services/client-api-service"
-import type { Document, ProcessingStatus } from "@/types"
-import { useToast } from "@/components/toast"
+import { useAuth } from "./use-auth"
+import { fetchDocuments, uploadDocument, deleteDocument, retryDocumentProcessing } from "@/services/client-api-service"
+import type { Document } from "@/types"
 
-export function useDocuments(userId?: string) {
+/**
+ * Hook for document management functionality
+ * @returns Document management methods and state
+ */
+export function useDocuments() {
+  const { user } = useAuth()
   const [documents, setDocuments] = useState<Document[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [processingStatus, setProcessingStatus] = useState<Record<string, ProcessingStatus>>({})
-  const { addToast } = useToast()
 
-  // Fetch documents
-  const refreshDocuments = useCallback(async () => {
-    if (!userId) return
+  // Fetch documents on mount and when user changes
+  useEffect(() => {
+    if (!user?.id) {
+      setDocuments([])
+      setIsLoading(false)
+      return
+    }
 
-    try {
+    const loadDocuments = async () => {
       setIsLoading(true)
       setError(null)
-      const data = await fetchDocuments(userId)
-      setDocuments(data)
-    } catch (err) {
-      console.error("Error fetching documents:", err)
-      setError(err instanceof Error ? err.message : "Failed to load documents")
-      addToast("Failed to load documents", "error")
-    } finally {
-      setIsLoading(false)
+      try {
+        const docs = await fetchDocuments(user.id)
+        setDocuments(docs)
+      } catch (err) {
+        console.error("Error fetching documents:", err)
+        setError(err instanceof Error ? err.message : "Failed to load documents")
+      } finally {
+        setIsLoading(false)
+      }
     }
-  }, [userId, addToast])
 
-  // Initial fetch
-  useEffect(() => {
-    if (userId) {
-      refreshDocuments()
-    }
-  }, [userId, refreshDocuments])
+    loadDocuments()
+  }, [user?.id])
 
-  // Upload document
-  const uploadDocument = useCallback(
-    async (file: File) => {
-      if (!userId) {
-        throw new Error("User ID is required")
+  /**
+   * Upload a document with progress tracking
+   * @param file File to upload
+   * @param onProgress Optional progress callback function
+   * @returns The created document
+   */
+  const handleUploadDocument = useCallback(
+    async (file: File, onProgress?: (progress: number) => void) => {
+      if (!user?.id) {
+        throw new Error("User not authenticated")
       }
 
       try {
-        const document = await uploadDocumentWithProgress(file, userId, (progress, step) => {
-          // Update processing status for this document
-          setProcessingStatus((prev) => ({
-            ...prev,
-            [document.id]: { progress, step },
-          }))
-        })
+        const newDocument = await uploadDocument(user.id, file, onProgress)
 
-        // Add the new document to the list
-        setDocuments((prev) => [document, ...prev])
-        return document
-      } catch (error) {
-        console.error("Error uploading document:", error)
-        addToast(`Failed to upload document: ${error instanceof Error ? error.message : "Unknown error"}`, "error")
-        throw error
+        // Add the new document to the state
+        setDocuments((prevDocs) => [newDocument, ...prevDocs])
+
+        return newDocument
+      } catch (err) {
+        console.error("Error uploading document:", err)
+        throw err
       }
     },
-    [userId, addToast],
+    [user?.id],
   )
 
-  // Delete document
-  const deleteDocument = useCallback(
+  /**
+   * Delete a document by ID
+   * @param documentId Document ID to delete
+   * @returns True if deletion was successful
+   */
+  const handleDeleteDocument = useCallback(
     async (documentId: string) => {
+      if (!user?.id) {
+        throw new Error("User not authenticated")
+      }
+
       try {
-        await apiDeleteDocument(documentId)
-        setDocuments((prev) => prev.filter((doc) => doc.id !== documentId))
+        await deleteDocument(documentId)
+
+        // Remove the deleted document from the state
+        setDocuments((prevDocs) => prevDocs.filter((doc) => doc.id !== documentId))
+
         return true
-      } catch (error) {
-        console.error("Error deleting document:", error)
-        addToast(`Failed to delete document: ${error instanceof Error ? error.message : "Unknown error"}`, "error")
-        throw error
+      } catch (err) {
+        console.error("Error deleting document:", err)
+        throw err
       }
     },
-    [addToast],
+    [user?.id],
   )
 
-  // Retry processing
-  const retryProcessing = useCallback(
+  /**
+   * Retry processing a failed document
+   * @param documentId Document ID to retry processing for
+   * @returns True if retry was successful
+   */
+  const handleRetryProcessing = useCallback(
     async (documentId: string) => {
+      if (!user?.id) {
+        throw new Error("User not authenticated")
+      }
+
       try {
         await retryDocumentProcessing(documentId)
-        // Update the document status
-        setDocuments((prev) =>
-          prev.map((doc) =>
+
+        // Update the document status in the state
+        setDocuments((prevDocs) =>
+          prevDocs.map((doc) =>
             doc.id === documentId
-              ? {
-                  ...doc,
-                  status: "processing",
-                  error_message: null,
-                  processing_progress: 0,
-                }
+              ? { ...doc, status: "processing", processing_progress: 0, error_message: undefined }
               : doc,
           ),
         )
+
         return true
-      } catch (error) {
-        console.error("Error retrying document processing:", error)
-        addToast(
-          `Failed to restart document processing: ${error instanceof Error ? error.message : "Unknown error"}`,
-          "error",
-        )
-        throw error
+      } catch (err) {
+        console.error("Error retrying document processing:", err)
+        throw err
       }
     },
-    [addToast],
+    [user?.id],
   )
+
+  /**
+   * Refresh documents from the API
+   * @returns The fetched documents
+   */
+  const handleRefreshDocuments = useCallback(async () => {
+    if (!user?.id) {
+      return []
+    }
+
+    try {
+      const docs = await fetchDocuments(user.id)
+      setDocuments(docs)
+      return docs
+    } catch (err) {
+      console.error("Error refreshing documents:", err)
+      throw err
+    }
+  }, [user?.id])
 
   return {
     documents,
     isLoading,
     error,
-    uploadDocument,
-    deleteDocument,
-    refreshDocuments,
-    retryProcessing,
-    processingStatus,
+    uploadDocument: handleUploadDocument,
+    deleteDocument: handleDeleteDocument,
+    retryProcessing: handleRetryProcessing,
+    refreshDocuments: handleRefreshDocuments,
   }
 }

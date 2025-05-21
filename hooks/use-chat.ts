@@ -13,8 +13,9 @@
  * - Automatic refresh of conversations and messages
  *
  * Dependencies:
- * - @/services/client-api-service for API calls
- * - @/components/toast for notifications
+ * - @/hooks/use-api for standardized API interactions
+ * - @/services/client-api-service for backend communication
+ * - @/types for type definitions
  *
  * @module hooks/use-chat
  */
@@ -22,187 +23,218 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
+import { useApi } from "@/hooks/use-api"
 import {
   fetchConversations,
-  fetchMessages,
   createConversation as apiCreateConversation,
+  fetchMessages,
   sendMessage as apiSendMessage,
 } from "@/services/client-api-service"
-import type { Conversation, Message } from "@/types"
-import { useToast } from "@/components/toast"
+import type { ChatMessage, Conversation } from "@/types"
 
-export function useChat(userId?: string) {
-  const [conversations, setConversations] = useState<Conversation[]>([])
-  const [isLoadingConversations, setIsLoadingConversations] = useState(true)
-  const [conversationsError, setConversationsError] = useState<Error | null>(null)
-
-  const [messages, setMessages] = useState<Message[]>([])
-  const [isLoadingMessages, setIsLoadingMessages] = useState(false)
-  const [messagesError, setMessagesError] = useState<Error | null>(null)
-
-  const [activeConversationId, setActiveConversationId] = useState<string | undefined>(undefined)
+/**
+ * Hook for chat functionality
+ * @param userId User ID for the current user
+ * @param initialConversationId Optional initial conversation ID to load
+ * @returns Chat state and methods
+ */
+export function useChat(userId: string, initialConversationId?: string) {
+  const [activeConversationId, setActiveConversationId] = useState<string | undefined>(initialConversationId)
+  const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isTyping, setIsTyping] = useState(false)
+  const [retryCount, setRetryCount] = useState(0)
 
-  const { addToast } = useToast()
+  // Ensure userId is valid before making any requests
+  const safeUserId = userId || ""
+
+  // Wrap the fetchMessages call with useCallback and proper validation
+  const fetchMessagesCallback = useCallback(() => {
+    if (!activeConversationId) {
+      console.log("No active conversation, skipping fetchMessages")
+      return Promise.resolve([])
+    }
+
+    console.log(`Fetching messages for conversation: ${activeConversationId}`)
+    return fetchMessages(activeConversationId)
+  }, [activeConversationId])
+
+  // Wrap the fetchConversations call with useCallback and proper validation
+  const fetchConversationsCallback = useCallback(() => {
+    if (!safeUserId) {
+      console.log("No userId provided, skipping fetchConversations")
+      return Promise.resolve([])
+    }
+
+    console.log(`Fetching conversations for user: ${safeUserId}`)
+    return fetchConversations(safeUserId)
+  }, [safeUserId])
+
+  // Fetch messages for the active conversation
+  const {
+    data: fetchedMessages,
+    isLoading: isLoadingMessages,
+    error: messagesError,
+    execute: loadMessages,
+  } = useApi<ChatMessage[], []>(fetchMessagesCallback)
 
   // Fetch conversations
-  const refreshConversations = useCallback(async () => {
-    if (!userId) return
+  const {
+    data: conversations,
+    isLoading: isLoadingConversations,
+    error: conversationsError,
+    execute: loadConversations,
+  } = useApi<Conversation[], []>(fetchConversationsCallback)
+
+  /**
+   * Create a new conversation with proper error handling
+   * @param title Optional title for the conversation
+   * @returns The created conversation
+   */
+  const createConversation = async (title: string) => {
+    if (!safeUserId) {
+      throw new Error("User ID is required to create a conversation")
+    }
+
+    if (!title || typeof title !== "string" || title.trim() === "") {
+      throw new Error("Conversation title cannot be empty")
+    }
 
     try {
-      console.log("Fetching conversations for user:", userId)
-      setIsLoadingConversations(true)
-      setConversationsError(null)
+      console.log(`Creating conversation with title: ${title}`)
+      const conversation = await apiCreateConversation(safeUserId, title)
 
-      const data = await fetchConversations(userId)
-      setConversations(data)
-    } catch (err) {
-      console.error("Error fetching conversations:", err)
-      const error = err instanceof Error ? err : new Error("Failed to load conversations")
-      setConversationsError(error)
-      addToast(`Failed to load conversations: ${error.message}`, "error")
-    } finally {
-      setIsLoadingConversations(false)
+      if (!conversation?.id) {
+        throw new Error("Failed to create conversation: No conversation ID returned")
+      }
+
+      console.log(`Conversation created with ID: ${conversation.id}`)
+      setActiveConversationId(conversation.id)
+      await loadConversations()
+      return conversation
+    } catch (error) {
+      console.error(`Error creating conversation:`, error)
+      throw error
     }
-  }, [userId, addToast])
+  }
 
-  // Fetch messages for active conversation
-  const refreshMessages = useCallback(async () => {
+  /**
+   * Send a message with validation and error handling
+   * @param content Message content
+   * @returns True if message was sent successfully
+   */
+  const sendMessage = async (content: string) => {
+    // Enhanced validation
     if (!activeConversationId) {
+      console.error("Cannot send message: No active conversation")
+      throw new Error("No active conversation")
+    }
+
+    if (!safeUserId) {
+      console.error("Cannot send message: No user ID")
+      throw new Error("User ID is required to send a message")
+    }
+
+    if (!content || typeof content !== "string" || content.trim() === "") {
+      console.error("Cannot send message: Empty content", {
+        contentType: typeof content,
+        contentLength: typeof content === "string" ? content.length : 0,
+      })
+      throw new Error("Message content cannot be empty")
+    }
+
+    setIsTyping(true)
+
+    try {
+      console.log(`Sending message to conversation: ${activeConversationId}`)
+
+      // Log the exact message being sent
+      console.log("Sending message with exact content:", {
+        conversationId: activeConversationId,
+        content, // Log full content
+        contentLength: content.length,
+        userId: safeUserId,
+      })
+
+      // Add the user message to the local state immediately for optimistic UI update
+      const tempUserMessage: ChatMessage = {
+        id: `temp_${Date.now()}`,
+        conversation_id: activeConversationId,
+        role: "user",
+        content,
+        created_at: new Date().toISOString(),
+      }
+
+      setMessages((prev) => [...prev, tempUserMessage])
+
+      const response = await apiSendMessage(activeConversationId, content, safeUserId)
+      
+      // Reload messages to get the new message and response
+      await loadMessages()
+      setRetryCount(0) // Reset retry count on success
+      return true
+    } catch (error) {
+      console.error("Error sending message:", {
+        error: error instanceof Error ? error.message : String(error),
+        conversationId: activeConversationId,
+        contentType: typeof content,
+        contentLength: content.length,
+      })
+
+      // Implement retry logic for transient errors
+      if (retryCount < 2) {
+        console.log(`Retrying send message (${retryCount + 1}/2)...`)
+        setRetryCount((prev) => prev + 1)
+        // Wait briefly before retrying
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+        return sendMessage(content)
+      }
+
+      throw error
+    } finally {
+      setIsTyping(false)
+    }
+  }
+
+  // Load messages when the active conversation changes
+  useEffect(() => {
+    if (activeConversationId) {
+      console.log(`Active conversation changed to: ${activeConversationId}, loading messages`)
+      loadMessages()
+    } else {
       console.log("No active conversation, clearing messages")
       setMessages([])
-      return
     }
+  }, [activeConversationId, loadMessages])
 
-    try {
-      setIsLoadingMessages(true)
-      setMessagesError(null)
-
-      const data = await fetchMessages(activeConversationId)
-      setMessages(data)
-    } catch (err) {
-      console.error("Error fetching messages:", err)
-      const error = err instanceof Error ? err : new Error("Failed to load messages")
-      setMessagesError(error)
-      addToast(`Failed to load messages: ${error.message}`, "error")
-    } finally {
-      setIsLoadingMessages(false)
-    }
-  }, [activeConversationId, addToast])
-
-  // Initial fetch of conversations
+  // Update messages when fetched messages change
   useEffect(() => {
-    if (userId) {
-      console.log("Loading conversations for user:", userId)
-      refreshConversations()
+    if (fetchedMessages) {
+      console.log(`Received ${fetchedMessages.length} messages from API`)
+      setMessages(fetchedMessages)
     }
-  }, [userId, refreshConversations])
+  }, [fetchedMessages])
 
-  // Fetch messages when active conversation changes
+  // Load conversations on mount or when userId changes
   useEffect(() => {
-    refreshMessages()
-  }, [activeConversationId, refreshMessages])
-
-  // Create a new conversation
-  const createConversation = useCallback(
-    async (title: string) => {
-      if (!userId) {
-        throw new Error("User ID is required")
-      }
-
-      try {
-        const newConversation = await apiCreateConversation(title, userId)
-
-        // Add to conversations list and set as active
-        setConversations((prev) => [newConversation, ...prev])
-        setActiveConversationId(newConversation.id)
-
-        return newConversation
-      } catch (err) {
-        console.error("Error creating conversation:", err)
-        const error = err instanceof Error ? err : new Error("Failed to create conversation")
-        addToast(`Failed to create conversation: ${error.message}`, "error")
-        throw error
-      }
-    },
-    [userId, addToast],
-  )
-
-  // Send a message in the active conversation
-  const sendMessage = useCallback(
-    async (content: string) => {
-      if (!activeConversationId) {
-        throw new Error("No active conversation")
-      }
-
-      if (!content.trim()) {
-        throw new Error("Message cannot be empty")
-      }
-
-      try {
-        // Add user message to the UI immediately
-        const tempUserMessage: Message = {
-          id: `temp-${Date.now()}`,
-          conversation_id: activeConversationId,
-          role: "user",
-          content,
-          created_at: new Date().toISOString(),
-        }
-
-        setMessages((prev) => [...prev, tempUserMessage])
-
-        // Show typing indicator
-        setIsTyping(true)
-
-        // Send message to API
-        const response = await apiSendMessage(activeConversationId, content)
-
-        // Hide typing indicator
-        setIsTyping(false)
-
-        // Update messages with the actual response
-        setMessages((prev) => [
-          ...prev.filter((msg) => msg.id !== tempUserMessage.id), // Remove temp message
-          response.userMessage,
-          response.aiMessage,
-        ])
-
-        // Update conversation in the list (it might have a new title or updated_at)
-        if (response.updatedConversation) {
-          setConversations((prev) =>
-            prev.map((conv) => (conv.id === activeConversationId ? response.updatedConversation : conv)),
-          )
-        }
-
-        return response
-      } catch (err) {
-        console.error("Error sending message:", err)
-        setIsTyping(false)
-        const error = err instanceof Error ? err : new Error("Failed to send message")
-        addToast(`Failed to send message: ${error.message}`, "error")
-        throw error
-      }
-    },
-    [activeConversationId, addToast],
-  )
+    if (safeUserId) {
+      console.log(`Loading conversations for user: ${safeUserId}`)
+      loadConversations()
+    }
+  }, [safeUserId, loadConversations])
 
   return {
-    conversations,
-    isLoadingConversations,
-    conversationsError,
-    refreshConversations,
-
     messages,
+    conversations: conversations || [],
     isLoadingMessages,
+    isLoadingConversations,
     messagesError,
-    refreshMessages,
-
+    conversationsError,
+    isTyping,
     activeConversationId,
     setActiveConversationId,
-
-    createConversation,
     sendMessage,
-
-    isTyping,
+    createConversation,
+    refreshMessages: loadMessages,
+    refreshConversations: loadConversations,
   }
 }

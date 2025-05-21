@@ -69,7 +69,7 @@ export async function createDocument(
     file_size: fileSize || 0,
     file_path: filePath || "",
     blob_url: blobUrl, // Store blob URL if provided
-    status: "processing", // Set initial status to "processing"
+    status: "processing", // Set initial status to "processing" instead of "created"
     processing_progress: 0,
     error_message: undefined,
     created_at: now,
@@ -83,8 +83,8 @@ export async function createDocument(
 
   await upsertVectors([
     {
-      id: documentId,
-      values: placeholderVector,
+      id: documentId, // FIXED: Use consistent ID pattern with no prefix
+      values: placeholderVector, // Non-zero placeholder vector
       metadata: {
         ...document,
         record_type: "document", // Consistent record_type field
@@ -152,10 +152,15 @@ export async function getDocumentsByUserId(userId: string): Promise<Document[]> 
   // Create a placeholder vector with non-zero values
   const placeholderVector = createPlaceholderVector()
 
-  const response = await queryVectors(placeholderVector, 100, true, {
-    user_id: { $eq: userId },
-    record_type: { $eq: "document" },
-  })
+  const response = await queryVectors(
+    placeholderVector, // Using correct non-zero vector
+    100,
+    true,
+    {
+      user_id: { $eq: userId },
+      record_type: { $eq: "document" },
+    },
+  )
 
   // Handle potential error from Pinecone
   if ("error" in response && response.error) {
@@ -197,10 +202,15 @@ export async function getDocumentById(id: string): Promise<Document | null> {
   // Create a placeholder vector with small non-zero values
   const placeholderVector = createPlaceholderVector()
 
-  const response = await queryVectors(placeholderVector, 1, true, {
-    id: { $eq: id },
-    record_type: { $eq: "document" },
-  })
+  const response = await queryVectors(
+    placeholderVector, // Non-zero placeholder vector
+    1,
+    true,
+    {
+      id: { $eq: id },
+      record_type: { $eq: "document" },
+    },
+  )
 
   // Handle potential error from Pinecone
   if ("error" in response && response.error) {
@@ -278,7 +288,7 @@ export async function updateDocumentStatus(
 
   await upsertVectors([
     {
-      id: documentId,
+      id: documentId, // FIXED: Use consistent ID pattern with no prefix
       values: placeholderVector,
       metadata: {
         ...updatedDocument,
@@ -296,15 +306,21 @@ export async function updateDocumentStatus(
  * @param options - Document processing options
  * @returns Processing result
  */
-export async function processDocument(options: ProcessDocumentOptions): Promise<{
+export async function processDocument({
+  documentId,
+  userId,
+  filePath,
+  fileName,
+  fileType,
+  fileUrl,
+  isRetry = false,
+}: ProcessDocumentOptions & { isRetry?: boolean }): Promise<{
   success: boolean
   chunksProcessed: number
   vectorsInserted: number
   error?: string
   debugInfo?: Record<string, any>
 }> {
-  const { documentId, userId, filePath, fileName, fileType, fileUrl, isRetry = false } = options
-
   // Initialize timing and debug info
   const startTime = performance.now()
   const debugInfo: Record<string, any> = {
@@ -313,13 +329,6 @@ export async function processDocument(options: ProcessDocumentOptions): Promise<
     steps: {},
     timings: {},
   }
-
-  // Set initial progress to ensure UI shows activity
-  await updateDocumentStatus(documentId, "processing", 5, "Starting document processing", {
-    ...debugInfo,
-    currentStep: "initialization",
-    processingStarted: true,
-  })
 
   try {
     // Validate required parameters
@@ -401,16 +410,16 @@ export async function processDocument(options: ProcessDocumentOptions): Promise<
         logger.info(`Backing off for ${backoffTime}ms before retry`, { documentId, retries })
         await new Promise((resolve) => setTimeout(resolve, backoffTime))
         retries++
-      } catch (error) {
+      } catch (fetchError) {
         logger.error(`Fetch attempt ${retries + 1} failed with error`, {
           documentId,
-          error: error instanceof Error ? error.message : "Unknown error",
+          error: fetchError instanceof Error ? fetchError.message : "Unknown error",
           attempt: retries + 1,
           maxRetries: MAX_RETRIES,
         })
 
         if (retries >= MAX_RETRIES - 1) {
-          fetchError = error instanceof Error ? error.message : "Unknown fetch error"
+          fetchError = fetchError instanceof Error ? fetchError.message : "Unknown fetch error"
           break
         }
 
@@ -439,18 +448,12 @@ export async function processDocument(options: ProcessDocumentOptions): Promise<
         retries,
       })
 
-      // Update status with more detailed error information
       await updateDocumentStatus(documentId, "failed", 0, errorMessage, {
         ...debugInfo,
         error: errorMessage,
         failedStep: "fetch_content",
         processingEndTime: new Date().toISOString(),
         totalDuration: performance.now() - startTime,
-        networkDetails: {
-          attempts: retries + 1,
-          lastStatus: response?.status,
-          lastStatusText: response?.statusText,
-        },
       })
 
       return {
@@ -516,6 +519,14 @@ export async function processDocument(options: ProcessDocumentOptions): Promise<
     const allChunks = chunkDocument(text, MAX_CHUNK_SIZE, CHUNK_OVERLAP)
     debugInfo.timings.chunkingTime = performance.now() - chunkingStartTime
 
+    // DEBUGGING: Log chunks before filtering
+    logger.info(`Document chunks before filtering:`, {
+      documentId,
+      totalChunks: allChunks.length,
+      sampleChunk: allChunks.length > 0 ? allChunks[0].substring(0, 100) + "..." : "None",
+      chunkSizes: allChunks.slice(0, 5).map((chunk) => chunk.length),
+    })
+
     // Filter out non-informative chunks
     const filteringStartTime = performance.now()
     const chunks = allChunks.filter((chunk) => isInformativeChunk(chunk))
@@ -529,6 +540,15 @@ export async function processDocument(options: ProcessDocumentOptions): Promise<
       averageChunkSize: chunks.length > 0 ? chunks.reduce((sum, chunk) => sum + chunk.length, 0) / chunks.length : 0,
       chunkSizesHistogram: calculateChunkSizeHistogram(chunks),
     }
+
+    // DEBUGGING: Log chunks after filtering
+    logger.info(`Document chunks after filtering:`, {
+      documentId,
+      validChunks: chunks.length,
+      sampleChunk: chunks.length > 0 ? chunks[0].substring(0, 100) + "..." : "None",
+      skippedChunks: allChunks.length - chunks.length,
+      filteringTime: debugInfo.timings.filteringTime.toFixed(2) + "ms",
+    })
 
     logger.info(`Processing document: Chunking complete`, {
       documentId,
@@ -584,15 +604,13 @@ export async function processDocument(options: ProcessDocumentOptions): Promise<
       successfulEmbeddings: 0,
       failedEmbeddings: 0,
       embeddingModel: EMBEDDING_MODEL,
-      totalVectorsInserted: 0,
     }
 
     // Process chunks in batches for embedding generation
     for (let i = 0; i < chunks.length; i += EMBEDDING_BATCH_SIZE) {
       const batchStartTime = performance.now()
       const batch = chunks.slice(i, i + EMBEDDING_BATCH_SIZE)
-      // More granular progress updates with minimum progress of 10%
-      const batchProgress = Math.max(10, Math.floor(40 + (i / chunks.length) * 50))
+      const batchProgress = Math.floor(40 + (i / chunks.length) * 50)
       const batchNumber = Math.floor(i / EMBEDDING_BATCH_SIZE) + 1
       const totalBatches = Math.ceil(chunks.length / EMBEDDING_BATCH_SIZE)
 
@@ -624,12 +642,10 @@ export async function processDocument(options: ProcessDocumentOptions): Promise<
         endIndex: i + batch.length - 1,
         chunkCount: batch.length,
         success: false,
-        embeddingResults: [] as any[],
-        errors: [] as any[],
+        embeddingResults: [],
+        errors: [],
         startTime: new Date().toISOString(),
         duration: 0,
-        upsertResults: [] as any[],
-        upsertErrors: [] as any[],
       }
 
       // Generate embeddings for this batch
@@ -862,7 +878,7 @@ export async function processDocument(options: ProcessDocumentOptions): Promise<
 
     await upsertVectors([
       {
-        id: documentId,
+        id: documentId, // FIXED: Use consistent ID pattern with no prefix
         values: placeholderVector,
         metadata: {
           id: documentId,
@@ -949,40 +965,24 @@ export async function processDocument(options: ProcessDocumentOptions): Promise<
  * Deletes a document and all its chunks
  *
  * @param id - Document ID
- * @returns Whether deletion was successful
  */
 export async function deleteDocument(id: string): Promise<void> {
-  logger.info(`Deleting document ${id}`)
+  // Delete the document
+  await deleteVectors([id]) // FIXED: Use consistent ID pattern with no prefix
 
-  try {
-    // Create a placeholder vector with small non-zero values
-    const placeholderVector = createPlaceholderVector()
+  // Create a placeholder vector with small non-zero values
+  const placeholderVector = createPlaceholderVector()
 
-    // Find all chunks for this document
-    const response = await queryVectors(placeholderVector, 1000, false, {
-      document_id: { $eq: id },
-      record_type: { $eq: "chunk" },
-    })
+  // Find all chunks for this document
+  const response = await queryVectors(placeholderVector, 1000, true, {
+    document_id: { $eq: id },
+    record_type: { $eq: "chunk" },
+  })
 
-    // Delete all chunks
-    if (response.matches && response.matches.length > 0) {
-      const chunkIds = response.matches.map((match) => match.id)
-      logger.info(`Found ${chunkIds.length} chunks to delete for document ${id}`)
-      await deleteVectors(chunkIds)
-      logger.info(`Successfully deleted ${chunkIds.length} chunks for document ${id}`)
-    } else {
-      logger.info(`No chunks found for document ${id}`)
-    }
-
-    // Delete the document itself
-    await deleteVectors([id])
-    logger.info(`Successfully deleted document ${id}`)
-  } catch (error) {
-    logger.error(`Error deleting document ${id}:`, {
-      error: error instanceof Error ? error.message : "Unknown error",
-      stack: error instanceof Error ? error.stack : undefined,
-    })
-    throw error
+  // Delete all chunks
+  if (response.matches && response.matches.length > 0) {
+    const chunkIds = response.matches.map((match) => match.id)
+    await deleteVectors(chunkIds)
   }
 }
 

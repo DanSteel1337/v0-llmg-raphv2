@@ -3,24 +3,23 @@
  *
  * Service layer for client-side API interactions with the backend.
  * Provides standardized methods for handling HTTP requests to all API endpoints.
- *
+ * 
  * Features:
  * - Document management (upload, retrieve, delete)
  * - Chat conversations and messages
  * - Search functionality
  * - Analytics data retrieval
  * - Health checks
- *
+ * 
  * Dependencies:
  * - apiCall utility for standardized request handling
  * - Type definitions for proper type safety
- *
+ * 
  * @module services/client-api-service
  */
 
 import { apiCall } from "./apiCall"
 import type { Document, AnalyticsData, Conversation, Message, SearchResult, SearchOptions } from "@/types"
-import { ProcessingStep } from "@/constants" // Import from constants.ts
 
 /**
  * Fetch documents for a user
@@ -53,171 +52,14 @@ export async function fetchDocuments(userId: string): Promise<Document[]> {
 }
 
 /**
- * Get processing step description
- *
- * @param step Processing step
- * @returns Human-readable description of the processing step
- */
-export function getProcessingStepDescription(step?: ProcessingStep): string {
-  switch (step) {
-    case ProcessingStep.INITIALIZING:
-      return "Initializing document processing"
-    case ProcessingStep.READING_FILE:
-      return "Reading file contents"
-    case ProcessingStep.CHUNKING:
-      return "Splitting document into chunks"
-    case ProcessingStep.EMBEDDING:
-      return "Generating embeddings"
-    case ProcessingStep.INDEXING:
-      return "Indexing document in vector database"
-    case ProcessingStep.FINALIZING:
-      return "Finalizing document processing"
-    case ProcessingStep.COMPLETED:
-      return "Processing completed"
-    case ProcessingStep.FAILED:
-      return "Processing failed"
-    default:
-      return "Processing document"
-  }
-}
-
-/**
  * Upload a document
  *
  * @param userId User ID who owns the document
  * @param file File to upload
+ * @param onProgress Optional progress callback
  * @returns Uploaded document metadata
  */
-export async function uploadDocument(userId: string, file: File): Promise<Document> {
-  try {
-    // Validate inputs
-    if (!userId) throw new Error("User ID is required")
-    if (!file) throw new Error("File is required")
-
-    // Step 1: Create document metadata
-    console.log("Creating document metadata...", {
-      userId,
-      fileName: file.name,
-      fileType: file.type,
-      fileSize: file.size,
-    })
-
-    const createResponse = await apiCall<{ success: boolean; document: Document }>("/api/documents", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        userId,
-        name: file.name,
-        fileType: file.type || "text/plain",
-        fileSize: file.size,
-        filePath: `${userId}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, "_")}`,
-      }),
-    })
-
-    // Validate document response
-    if (!createResponse.success || !createResponse.document?.id || !createResponse.document?.file_path) {
-      console.error("Document creation failed - missing fields:", createResponse)
-      throw new Error("Document creation failed: Missing document ID or file path")
-    }
-
-    const document = createResponse.document
-    console.log("Document metadata created successfully:", {
-      documentId: document.id,
-      filePath: document.file_path,
-    })
-
-    // Step 2: Upload the file content
-    console.log("Uploading file content...", {
-      documentId: document.id,
-      filePath: document.file_path,
-    })
-
-    const formData = new FormData()
-    formData.append("file", file)
-    formData.append("userId", userId)
-    formData.append("documentId", document.id)
-    formData.append("filePath", document.file_path)
-
-    const uploadResponse = await apiCall<{
-      success: boolean
-      documentId: string
-      fileUrl: string
-      blobUrl?: string
-    }>("/api/documents/upload", {
-      method: "POST",
-      body: formData,
-    })
-
-    if (!uploadResponse.success) {
-      console.error("File upload failed:", uploadResponse)
-      throw new Error("File upload failed")
-    }
-
-    // Get the file URL (prioritize blobUrl)
-    const fileUrl =
-      uploadResponse.blobUrl ||
-      uploadResponse.fileUrl ||
-      `/api/documents/file?path=${encodeURIComponent(document.file_path)}`
-
-    console.log("File uploaded successfully:", {
-      documentId: document.id,
-      fileUrl,
-    })
-
-    // Step 3: Process the document
-    console.log("Triggering document processing...", {
-      documentId: document.id,
-      fileUrl,
-    })
-
-    try {
-      const processResponse = await apiCall<{ success: boolean; status?: string }>("/api/documents/process", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          documentId: document.id,
-          userId,
-          filePath: document.file_path,
-          fileName: file.name,
-          fileType: file.type || "text/plain",
-          fileUrl,
-        }),
-      })
-
-      if (!processResponse.success) {
-        throw new Error(processResponse.error || "Document processing failed to start")
-      }
-
-      console.log("Document processing triggered:", {
-        documentId: document.id,
-        status: processResponse.status || "processing",
-      })
-    } catch (error) {
-      console.error("Error triggering document processing:", error)
-      throw new Error(
-        `Failed to start document processing: ${error instanceof Error ? error.message : "Unknown error"}`,
-      )
-    }
-
-    return {
-      ...document,
-      blob_url: uploadResponse.blobUrl, // Add blob URL to document
-    }
-  } catch (error) {
-    console.error("Document upload pipeline failed:", error)
-    throw error
-  }
-}
-
-/**
- * Upload a document with progress tracking
- *
- * @param userId User ID who owns the document
- * @param file File to upload
- * @param onProgress Optional callback for tracking upload progress
- * @returns Uploaded document metadata
- */
-export async function uploadDocumentWithProgress(
+export async function uploadDocument(
   userId: string,
   file: File,
   onProgress?: (progress: number) => void,
@@ -259,9 +101,6 @@ export async function uploadDocumentWithProgress(
       filePath: document.file_path,
     })
 
-    // Call progress callback with 10% (metadata created)
-    if (onProgress) onProgress(10)
-
     // Step 2: Upload the file content
     console.log("Uploading file content...", {
       documentId: document.id,
@@ -276,7 +115,6 @@ export async function uploadDocumentWithProgress(
 
     const uploadResponse = await apiCall<{
       success: boolean
-      documentId: string
       fileUrl: string
       blobUrl?: string
     }>("/api/documents/upload", {
@@ -289,10 +127,7 @@ export async function uploadDocumentWithProgress(
       throw new Error("File upload failed")
     }
 
-    // Call progress callback with 50% (file uploaded)
-    if (onProgress) onProgress(50)
-
-    // Get the file URL (prioritize blobUrl)
+    // Prioritize blobUrl if available, fall back to fileUrl
     const fileUrl =
       uploadResponse.blobUrl ||
       uploadResponse.fileUrl ||
@@ -300,54 +135,93 @@ export async function uploadDocumentWithProgress(
 
     console.log("File uploaded successfully:", {
       documentId: document.id,
+      filePath: document.file_path,
       fileUrl,
+      hasBlobUrl: !!uploadResponse.blobUrl,
     })
 
     // Step 3: Process the document
     console.log("Triggering document processing...", {
       documentId: document.id,
+      filePath: document.file_path,
       fileUrl,
     })
 
     try {
-      const processResponse = await apiCall<{ success: boolean; status?: string }>("/api/documents/process", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          documentId: document.id,
-          userId,
-          filePath: document.file_path,
-          fileName: file.name,
-          fileType: file.type || "text/plain",
-          fileUrl,
-        }),
-      })
+      const processResponse = await apiCall<{ success: boolean; status?: string; message?: string; error?: string }>(
+        "/api/documents/process",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            documentId: document.id,
+            userId,
+            filePath: document.file_path,
+            fileName: file.name,
+            fileType: file.type || "text/plain",
+            fileUrl,
+          }),
+        },
+      )
 
-      if (!processResponse.success) {
-        throw new Error(processResponse.error || "Document processing failed to start")
+      // Log the full response for debugging
+      console.log("Document processing response:", processResponse)
+
+      if (!processResponse || processResponse.success !== true) {
+        const errorMessage = processResponse?.error || "Unknown error"
+        console.error("Document processing failed to start:", { error: errorMessage, response: processResponse })
+        throw new Error(`Failed to start document processing: ${errorMessage}`)
       }
 
       console.log("Document processing triggered:", {
         documentId: document.id,
+        filePath: document.file_path,
+        fileUrl,
         status: processResponse.status || "processing",
       })
-
-      // Call progress callback with 75% (processing started)
-      if (onProgress) onProgress(75)
-    } catch (error) {
-      console.error("Error triggering document processing:", error)
+    } catch (processError) {
+      console.error("Error triggering document processing:", processError)
       throw new Error(
-        `Failed to start document processing: ${error instanceof Error ? error.message : "Unknown error"}`,
+        `Failed to start document processing: ${
+          processError instanceof Error ? processError.message : "Unknown error"
+        }`,
       )
     }
 
-    // Call progress callback with 100% (complete)
-    if (onProgress) onProgress(100)
+    // Poll for document status updates if progress callback provided
+    if (onProgress) {
+      const pollInterval = setInterval(async () => {
+        try {
+          const documents = await fetchDocuments(userId)
+          const updatedDocument = documents.find((d) => d.id === document.id)
 
-    return {
-      ...document,
-      blob_url: uploadResponse.blobUrl, // Add blob URL to document
+          if (updatedDocument) {
+            if (updatedDocument.status === "indexed" || updatedDocument.status === "failed") {
+              clearInterval(pollInterval)
+              onProgress(updatedDocument.status === "indexed" ? 100 : 0)
+              console.log("Document processing completed:", {
+                documentId: document.id,
+                status: updatedDocument.status,
+                message: updatedDocument.error_message || "Success",
+              })
+            } else if (updatedDocument.processing_progress !== undefined) {
+              onProgress(updatedDocument.processing_progress)
+              console.log("Document processing progress:", {
+                documentId: document.id,
+                progress: updatedDocument.processing_progress,
+              })
+            }
+          }
+        } catch (error) {
+          console.error("Error polling document status:", error)
+        }
+      }, 2000)
+
+      // Clean up interval after 5 minutes (max processing time)
+      setTimeout(() => clearInterval(pollInterval), 5 * 60 * 1000)
     }
+
+    return document
   } catch (error) {
     console.error("Document upload pipeline failed:", error)
     throw error
@@ -401,13 +275,13 @@ export async function fetchAnalytics(userId: string, timeframe?: string): Promis
   try {
     if (!userId) {
       console.error("fetchAnalytics called without userId")
-      return {
-        documentCount: 0,
-        chunkCount: 0,
-        searchCount: 0,
-        chatCount: 0,
-        topDocuments: [],
-        topSearches: [],
+      return { 
+        documentCount: 0, 
+        chunkCount: 0, 
+        searchCount: 0, 
+        chatCount: 0, 
+        topDocuments: [], 
+        topSearches: [] 
       }
     }
 
@@ -417,13 +291,13 @@ export async function fetchAnalytics(userId: string, timeframe?: string): Promis
     return response
   } catch (error) {
     console.error("Error fetching analytics:", error)
-    return {
-      documentCount: 0,
-      chunkCount: 0,
-      searchCount: 0,
-      chatCount: 0,
-      topDocuments: [],
-      topSearches: [],
+    return { 
+      documentCount: 0, 
+      chunkCount: 0, 
+      searchCount: 0, 
+      chatCount: 0, 
+      topDocuments: [], 
+      topSearches: [] 
     }
   }
 }
@@ -433,39 +307,39 @@ export async function fetchAnalytics(userId: string, timeframe?: string): Promis
  *
  * @returns Health status object with service health indicators
  */
-export async function checkApiHealth(): Promise<{
-  pineconeApiHealthy: boolean | null
-  openaiApiHealthy: boolean | null
-  errors?: {
-    pinecone?: string | null
-    openai?: string | null
-  }
+export async function checkApiHealth(): Promise<{ 
+  pineconeApiHealthy: boolean | null; 
+  openaiApiHealthy: boolean | null; 
+  errors?: { 
+    pinecone?: string | null; 
+    openai?: string | null; 
+  } 
 }> {
   try {
     const response = await apiCall<{
-      success: boolean
-      status: string
-      services: Record<string, boolean>
+      success: boolean;
+      status: string;
+      services: Record<string, boolean>;
       errors: {
-        pinecone: string | null
-        openai: string | null
+        pinecone: string | null;
+        openai: string | null;
       }
     }>("/api/health")
 
     return {
       pineconeApiHealthy: response?.services?.pinecone ?? null,
       openaiApiHealthy: response?.services?.openai ?? null,
-      errors: response?.errors,
+      errors: response?.errors
     }
   } catch (error) {
     console.error("Error checking API health:", error)
-    return {
-      pineconeApiHealthy: false,
+    return { 
+      pineconeApiHealthy: false, 
       openaiApiHealthy: false,
       errors: {
         pinecone: error instanceof Error ? error.message : "Unknown error",
-        openai: "Connection failed",
-      },
+        openai: "Connection failed"
+      }
     }
   }
 }
@@ -571,7 +445,11 @@ export async function fetchMessages(conversationId: string): Promise<Message[]> 
  * @param userId User ID sending the message
  * @returns The AI message response
  */
-export async function sendMessage(conversationId: string, content: string, userId: string): Promise<Message | null> {
+export async function sendMessage(
+  conversationId: string,
+  content: string,
+  userId: string
+): Promise<Message | null> {
   try {
     if (!conversationId) throw new Error("Conversation ID is required")
     if (!userId) throw new Error("User ID is required")
@@ -612,7 +490,7 @@ export async function sendMessage(conversationId: string, content: string, userI
 export async function performSearch(
   userId: string,
   query: string,
-  options: SearchOptions = { type: "semantic" },
+  options: SearchOptions = { type: "semantic" }
 ): Promise<SearchResult[]> {
   try {
     if (!userId) throw new Error("User ID is required")
@@ -631,7 +509,7 @@ export async function performSearch(
 
     // Add document type filters if present
     if (options.documentTypes && Array.isArray(options.documentTypes)) {
-      options.documentTypes.forEach((type) => {
+      options.documentTypes.forEach(type => {
         searchParams.append("documentType", type)
       })
     }
@@ -652,7 +530,7 @@ export async function performSearch(
     }
 
     const response = await apiCall<{ success: boolean; results: SearchResult[] }>(
-      `/api/search?${searchParams.toString()}`,
+      `/api/search?${searchParams.toString()}`
     )
 
     if (!response || !response.success) {
@@ -664,51 +542,5 @@ export async function performSearch(
   } catch (error) {
     console.error("Error performing search:", error)
     throw error
-  }
-}
-
-/**
- * Perform a search query (alias for performSearch)
- *
- * @param userId User ID performing the search
- * @param query Search query
- * @param options Optional search options
- * @returns Search results
- */
-export async function searchDocuments(
-  userId: string,
-  query: string,
-  options: SearchOptions = { type: "semantic" },
-): Promise<SearchResult[]> {
-  return performSearch(userId, query, options)
-}
-
-/**
- * Fetch recent searches for a user
- *
- * @param userId User ID to fetch recent searches for
- * @param limit Optional limit on number of searches to return
- * @returns Array of recent search queries
- */
-export async function getRecentSearches(userId: string, limit = 5): Promise<string[]> {
-  try {
-    if (!userId) {
-      console.error("getRecentSearches called without userId")
-      return []
-    }
-
-    const response = await apiCall<{ success: boolean; searches: string[] }>(
-      `/api/search/recent?userId=${encodeURIComponent(userId)}&limit=${limit}`,
-    )
-
-    if (!response || !response.success || !response.searches) {
-      console.warn("Received invalid response from recent searches API", { response })
-      return []
-    }
-
-    return Array.isArray(response.searches) ? response.searches : []
-  } catch (error) {
-    console.error("Error fetching recent searches:", error)
-    return []
   }
 }

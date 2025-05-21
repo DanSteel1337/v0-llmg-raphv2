@@ -1,49 +1,58 @@
-import type React from "react"
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
-import { cn } from "@/lib/utils"
+/**
+ * Dashboard Card Component
+ *
+ * A reusable card component for dashboard widgets with consistent styling,
+ * header, and action buttons.
+ *
+ * Dependencies:
+ * - None
+ */
 
-interface DashboardCardProps extends React.HTMLAttributes<HTMLDivElement> {
-  title?: React.ReactNode
-  description?: React.ReactNode
+import type React from "react"
+
+interface DashboardCardProps {
+  title: string
+  description?: string
+  children: React.ReactNode
   footer?: React.ReactNode
+  className?: string
+  linkTo?: string
+  linkText?: string
   isLoading?: boolean
-  headerClassName?: string
-  contentClassName?: string
-  footerClassName?: string
 }
 
 export function DashboardCard({
   title,
   description,
-  footer,
   children,
+  footer,
+  className = "",
+  linkTo,
+  linkText = "View All",
   isLoading = false,
-  className,
-  headerClassName,
-  contentClassName,
-  footerClassName,
-  ...props
 }: DashboardCardProps) {
   return (
-    <Card className={cn("overflow-hidden", className)} {...props}>
-      {(title || description) && (
-        <CardHeader className={cn("flex flex-row items-center justify-between space-y-0 pb-2", headerClassName)}>
+    <div className={`bg-white rounded-lg shadow-md overflow-hidden ${className}`}>
+      <div className="p-4 border-b border-gray-200">
+        <div className="flex justify-between items-center">
           <div>
-            {title && <CardTitle>{title}</CardTitle>}
-            {description && <CardDescription>{description}</CardDescription>}
+            <h3 className="text-lg font-medium text-gray-900">{title}</h3>
+            {description && <p className="mt-1 text-sm text-gray-500">{description}</p>}
           </div>
-        </CardHeader>
-      )}
-      <CardContent className={cn("px-6", contentClassName)}>
+        </div>
+      </div>
+
+      <div className={`p-4 ${isLoading ? "opacity-50" : ""}`}>
         {isLoading ? (
-          <div className="flex h-[200px] items-center justify-center">
-            <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-t-2 border-gray-900"></div>
+          <div className="flex justify-center items-center py-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
           </div>
         ) : (
           children
         )}
-      </CardContent>
-      {footer && <CardFooter className={cn("border-t px-6 py-4", footerClassName)}>{footer}</CardFooter>}
-    </Card>
+      </div>
+
+      {footer && <div className="bg-gray-50 px-4 py-3 border-t border-gray-200">{footer}</div>}
+    </div>
   )
 }

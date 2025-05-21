@@ -8,14 +8,14 @@
  * - @/utils/errorHandling for consistent error handling
  * - @/utils/apiRequest for standardized API responses
  * - @/lib/utils/logger for logging
- * - @/lib/pinecone-rest-client for Pinecone health check
+ * - @/lib/pinecone-client for Pinecone health check
  */
 
 import type { NextRequest } from "next/server"
 import { handleApiRequest } from "@/utils/apiRequest"
 import { withErrorHandling } from "@/utils/errorHandling"
 import { logger } from "@/lib/utils/logger"
-import { healthCheck as pineconeHealthCheck } from "@/lib/pinecone-rest-client"
+import { healthCheck as pineconeHealthCheck } from "@/lib/pinecone-client"
 
 export const runtime = "edge"
 
@@ -28,8 +28,9 @@ export const GET = withErrorHandling(async (request: NextRequest) => {
     let pineconeError = null
     try {
       const pineconeHealth = await pineconeHealthCheck()
-      pineconeHealthy = pineconeHealth.healthy
-      pineconeError = pineconeHealth.error
+      // Safely access the healthy property with a fallback
+      pineconeHealthy = pineconeHealth?.healthy === true
+      pineconeError = pineconeHealth?.error || null
 
       logger.info("Pinecone health check result", {
         healthy: pineconeHealthy,

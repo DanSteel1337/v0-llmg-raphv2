@@ -1,154 +1,152 @@
 /**
- * Authentication Hook
+ * Auth Hook
  *
- * Custom hook for handling user authentication state and operations.
- * Provides functions for sign in, sign out, and session management.
+ * Custom hook for authentication functionality.
  *
  * Dependencies:
- * - @/lib/supabase-client for authentication API
- * - @/components/toast for notifications
+ * - @/services/auth-service for authentication operations
  */
 
 "use client"
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs"
-import type { Session, User, AuthError } from "@supabase/supabase-js"
-import { useToast } from "@/components/toast"
+import {
+  getCurrentUser,
+  signInWithEmail as authSignInWithEmail,
+  signUpWithEmail as authSignUpWithEmail,
+  signOut as authSignOut,
+  resetPassword as authResetPassword,
+  updatePassword as authUpdatePassword,
+} from "@/services/auth-service"
+import type { User } from "@supabase/supabase-js"
 
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null)
-  const [session, setSession] = useState<Session | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [authError, setAuthError] = useState<AuthError | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const router = useRouter()
-  const { addToast } = useToast()
-  const supabase = createClientComponentClient()
 
-  // Initialize auth state
   useEffect(() => {
-    const initAuth = async () => {
+    async function loadUser() {
       try {
-        setLoading(true)
-        console.log("Auth state check: Initializing...")
-
-        // Get session from Supabase
-        const { data, error } = await supabase.auth.getSession()
-
-        if (error) {
-          console.error("Auth session error:", error)
-          setAuthError(error)
-          addToast(`Authentication error: ${error.message}`, "error")
-          return
-        }
-
-        if (data?.session) {
-          console.log("Auth state check: Session found")
-          setSession(data.session)
-          setUser(data.session.user)
-        } else {
-          console.log("Auth state check: Auth session missing!")
-        }
+        setIsLoading(true)
+        const currentUser = await getCurrentUser()
+        setUser(currentUser)
       } catch (err) {
-        console.error("Auth initialization error:", err)
-        addToast("Failed to initialize authentication", "error")
+        console.error("Error in loadUser:", err)
+        setError(err instanceof Error ? err.message : "Failed to load user")
       } finally {
-        setLoading(false)
+        setIsLoading(false)
       }
     }
 
-    initAuth()
+    loadUser()
+  }, [])
 
-    // Set up auth state change listener
-    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
-      console.log("Auth state change:", event)
-      setSession(session)
-      setUser(session?.user ?? null)
-
-      // Handle auth events
-      if (event === "SIGNED_IN") {
-        router.refresh()
-      } else if (event === "SIGNED_OUT") {
-        router.push("/login")
-      }
-    })
-
-    // Clean up listener
-    return () => {
-      authListener.subscription.unsubscribe()
-    }
-  }, [supabase, router, addToast])
-
-  // Sign in with email and password
-  const signIn = async (email: string, password: string) => {
+  const signInWithEmail = async (email: string, password: string) => {
+    setIsLoading(true)
+    setError(null)
     try {
-      setLoading(true)
-      setAuthError(null)
-
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      })
-
+      const { data, error } = await authSignInWithEmail(email, password)
       if (error) {
-        setAuthError(error)
-        addToast(`Sign in failed: ${error.message}`, "error")
-        return { success: false, error }
+        setError(error.message)
+        return { data: null, error }
       }
-
-      if (data?.session) {
-        setSession(data.session)
-        setUser(data.session.user)
-        addToast("Signed in successfully", "success")
-        router.push("/dashboard")
-        return { success: true, data }
-      }
-
-      return { success: false, error: new Error("No session returned") }
+      setUser(data.user)
+      return { data, error: null }
     } catch (err) {
-      console.error("Sign in error:", err)
-      const error = err instanceof Error ? err : new Error("Unknown error during sign in")
-      addToast(`Sign in failed: ${error.message}`, "error")
-      return { success: false, error }
+      const errorMessage = err instanceof Error ? err.message : "Failed to sign in"
+      setError(errorMessage)
+      return { data: null, error: { message: errorMessage } }
     } finally {
-      setLoading(false)
+      setIsLoading(false)
     }
   }
 
-  // Sign out
-  const signOut = async () => {
+  const signUpWithEmail = async (email: string, password: string) => {
+    setIsLoading(true)
+    setError(null)
     try {
-      setLoading(true)
-      const { error } = await supabase.auth.signOut()
-
+      const { data, error } = await authSignUpWithEmail(email, password)
       if (error) {
-        setAuthError(error)
-        addToast(`Sign out failed: ${error.message}`, "error")
-        return { success: false, error }
+        setError(error.message)
+        return { data: null, error }
       }
+      setUser(data.user)
+      return { data, error: null }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Failed to sign up"
+      setError(errorMessage)
+      return { data: null, error: { message: errorMessage } }
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
-      setSession(null)
+  const signOut = async () => {
+    setIsLoading(true)
+    setError(null)
+    try {
+      await authSignOut()
       setUser(null)
       router.push("/login")
-      return { success: true }
+      return { error: null }
     } catch (err) {
-      console.error("Sign out error:", err)
-      const error = err instanceof Error ? err : new Error("Unknown error during sign out")
-      addToast(`Sign out failed: ${error.message}`, "error")
-      return { success: false, error }
+      const errorMessage = err instanceof Error ? err.message : "Failed to sign out"
+      setError(errorMessage)
+      return { error: { message: errorMessage } }
     } finally {
-      setLoading(false)
+      setIsLoading(false)
+    }
+  }
+
+  const resetPassword = async (email: string) => {
+    setIsLoading(true)
+    setError(null)
+    try {
+      const { data, error } = await authResetPassword(email)
+      if (error) {
+        setError(error.message)
+        return { data: null, error }
+      }
+      return { data, error: null }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Failed to reset password"
+      setError(errorMessage)
+      return { data: null, error: { message: errorMessage } }
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const updatePassword = async (password: string) => {
+    setIsLoading(true)
+    setError(null)
+    try {
+      const { data, error } = await authUpdatePassword(password)
+      if (error) {
+        setError(error.message)
+        return { data: null, error }
+      }
+      return { data, error: null }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Failed to update password"
+      setError(errorMessage)
+      return { data: null, error: { message: errorMessage } }
+    } finally {
+      setIsLoading(false)
     }
   }
 
   return {
     user,
-    session,
-    loading,
-    error: authError,
-    signIn,
+    isLoading,
+    error,
+    signInWithEmail,
+    signUpWithEmail,
     signOut,
-    isAuthenticated: !!user,
+    resetPassword,
+    updatePassword,
   }
 }
