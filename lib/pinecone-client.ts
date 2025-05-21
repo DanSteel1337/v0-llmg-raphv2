@@ -1,24 +1,29 @@
 /**
- * Pinecone Client for Serverless (Edge Runtime)
+ * Pinecone Client for Serverless
  *
- * Server-only singleton implementation for Pinecone v0.5.2+ vector database.
- * Provides a consistent interface for vector operations in Edge Runtime.
+ * Provides a standardized interface for interacting with Pinecone Serverless vector database.
+ * Implements retry logic, error handling, and validation to ensure reliable operations.
  *
  * IMPORTANT:
- * - This file is server-only and should not be imported in client components
- * - Uses singleton pattern compatible with Edge Runtime
- * - Implements retry logic for resilience against rate limits
- * - Validates environment variables before use
- * - Compatible with text-embedding-3-large (3072 dimensions)
+ * - Always use createPlaceholderVector() for placeholders, never zero vectors
+ * - Document IDs should not have prefixes when stored in Pinecone
+ * - All vector operations must be Edge-compatible
+ * - Always implement retry logic for rate limits
+ * - Always validate vectors before sending to Pinecone
+ *
+ * Dependencies:
+ * - @/lib/embedding-config for vector dimensions
+ * - @/lib/utils/logger for structured logging
  *
  * @module lib/pinecone-client
  */
 
-// Mark as server-only
-// 'use server' - Not using this directive as it's not needed in lib files
+import { VECTOR_DIMENSION } from "@/lib/embedding-config"
+import { logger } from "@/lib/utils/logger"
 
-import { VECTOR_DIMENSION, EMBEDDING_MODEL } from "./embedding-config"
-import { logger } from "./utils/logger"
+// Singleton instance
+let apiKey: string | null = null
+let pineconeHost: string | null = null
 
 // Types for Pinecone operations
 export interface PineconeRecord {
@@ -35,102 +40,81 @@ export interface QueryResponse {
   matches: Array<{
     id: string
     score: number
+    values?: number[]
     metadata?: Record<string, any>
   }>
   namespace?: string
-}
-
-// Singleton instance
-let pineconeClient: any = null
-let pineconeIndex: any = null
-
-/**
- * Validates required environment variables for Pinecone
- * @throws Error if any required environment variable is missing
- */
-function validateEnv(): void {
-  const requiredVars = ["PINECONE_API_KEY", "PINECONE_INDEX_NAME", "PINECONE_ENVIRONMENT"]
-
-  const missing = requiredVars.filter((varName) => !process.env[varName])
-
-  if (missing.length > 0) {
-    throw new Error(`Missing required environment variables: ${missing.join(", ")}`)
+  usage?: {
+    readUnits: number
   }
 }
 
 /**
- * Gets or initializes the Pinecone client
+ * Gets the Pinecone client configuration
  * Uses singleton pattern to avoid recreating the client on each request
  *
- * @returns Initialized Pinecone client
+ * @returns Client configuration with API key and host
+ * @throws Error if environment variables are not configured correctly
  */
-export async function getPineconeClient() {
-  // Only initialize once
-  if (!pineconeClient) {
-    try {
-      validateEnv()
-
-      const apiKey = process.env.PINECONE_API_KEY!
-      const environment = process.env.PINECONE_ENVIRONMENT!
-
-      // Using REST client approach for Edge compatibility
-      pineconeClient = {
-        apiKey,
-        environment,
-        baseUrl: `https://${environment}.pinecone.io`,
-      }
-
-      logger.info("Initialized Pinecone client", {
-        environment,
-      })
-    } catch (error) {
-      logger.error("Failed to initialize Pinecone client", {
-        error: error instanceof Error ? error.message : String(error),
-      })
-      throw error
+export function getPineconeClient() {
+  if (!apiKey) {
+    apiKey = process.env.PINECONE_API_KEY
+    if (!apiKey) {
+      throw new Error("PINECONE_API_KEY is not defined")
     }
   }
 
-  return pineconeClient
+  if (!pineconeHost) {
+    // First try PINECONE_HOST, then fall back to PINECONE_ENVIRONMENT
+    pineconeHost = process.env.PINECONE_HOST || process.env.PINECONE_ENVIRONMENT
+
+    if (!pineconeHost) {
+      throw new Error(
+        "PINECONE_HOST or PINECONE_ENVIRONMENT is not defined. For Serverless indexes, you must set the exact host URL from the Pinecone console.",
+      )
+    }
+
+    // Ensure the host URL is properly formatted
+    if (!pineconeHost.startsWith("https://")) {
+      pineconeHost = `https://${pineconeHost}`
+    }
+
+    // Log the host URL for debugging (safely)
+    logger.info(`Initialized Pinecone client with host: ${pineconeHost}`)
+  }
+
+  return { apiKey, host: pineconeHost }
 }
 
 /**
- * Gets or initializes the Pinecone index
+ * Validates vector dimensions against the expected dimension
  *
- * @returns Initialized Pinecone index
+ * @param vector - Vector to validate
+ * @throws Error if vector is invalid
  */
-export async function getPineconeIndex() {
-  if (!pineconeIndex) {
-    try {
-      const client = await getPineconeClient()
-      const indexName = process.env.PINECONE_INDEX_NAME!
-
-      // Create a reference to the index
-      pineconeIndex = {
-        ...client,
-        indexName,
-        indexUrl: `https://${indexName}-${client.environment}.svc.${client.environment}.pinecone.io`,
-      }
-
-      logger.info("Initialized Pinecone index", {
-        indexName,
-      })
-    } catch (error) {
-      logger.error("Failed to initialize Pinecone index", {
-        error: error instanceof Error ? error.message : String(error),
-      })
-      throw error
-    }
+export function validateVectorDimension(vector: number[]): void {
+  if (!vector || !Array.isArray(vector)) {
+    throw new Error(`Invalid vector: expected array, got ${typeof vector}`)
   }
 
-  return pineconeIndex
+  if (vector.length !== VECTOR_DIMENSION) {
+    throw new Error(
+      `Vector dimension mismatch: Expected ${VECTOR_DIMENSION}, got ${vector.length}. ` +
+        `Make sure you're using the correct embedding model (text-embedding-3-large).`,
+    )
+  }
+
+  // Check if vector is all zeros
+  if (vector.every((v) => v === 0)) {
+    throw new Error("Invalid vector: contains only zeros")
+  }
 }
 
 /**
- * Implements exponential backoff retry logic for Pinecone operations
+ * Implements exponential backoff retry logic for API calls
  *
  * @param operation - Async function to retry
- * @param maxRetries - Maximum number of retry attempts
+ * @param maxRetries - Maximum retry attempts
  * @param initialBackoff - Initial backoff time in ms
  * @returns Result of the operation
  */
@@ -175,173 +159,256 @@ export async function withRetry<T>(operation: () => Promise<T>, maxRetries = 3, 
 }
 
 /**
- * Query Pinecone with retry logic
+ * Creates a placeholder vector with small non-zero values
+ * This prevents Pinecone from rejecting the vector for being all zeros
  *
- * @param vector - Query vector
- * @param topK - Maximum number of results
- * @param filter - Optional filter criteria
- * @param namespace - Optional namespace
- * @returns Query results
+ * @returns Non-zero vector with correct dimensions
  */
-export async function queryPineconeWithRetry(
-  vector: number[],
-  topK = 5,
-  filter?: PineconeFilter,
-  namespace = "",
-): Promise<QueryResponse> {
+export function createPlaceholderVector(): number[] {
+  // Create a vector with small random values instead of zeros
+  return Array(VECTOR_DIMENSION)
+    .fill(0)
+    .map(() => Math.random() * 0.001 + 0.0001) // Ensure values are never exactly zero
+}
+
+/**
+ * Upsert vectors to Pinecone
+ *
+ * @param vectors - Array of vectors to insert/update
+ * @param namespace - Optional namespace (default: "")
+ * @returns Upsert result with count
+ */
+export async function upsertVectors(vectors: PineconeRecord[], namespace = ""): Promise<{ upsertedCount: number }> {
+  logger.info(`Upserting ${vectors.length} vectors to Pinecone`, {
+    namespace: namespace || "default",
+    vectorCount: vectors.length,
+  })
+
   return withRetry(async () => {
-    const index = await getPineconeIndex()
+    try {
+      const { apiKey, host } = getPineconeClient()
 
-    // Validate vector dimensions
-    if (vector.length !== VECTOR_DIMENSION) {
-      throw new Error(
-        `Vector dimension mismatch: Expected ${VECTOR_DIMENSION}, got ${vector.length}. ` +
-          `Make sure you're using the correct embedding model (${EMBEDDING_MODEL}).`,
-      )
-    }
+      // Filter out invalid vectors
+      const validVectors = vectors.filter((vector) => {
+        if (!vector.values || !Array.isArray(vector.values)) {
+          logger.error("Rejecting vector with missing or invalid values array", {
+            vectorId: vector.id,
+          })
+          return false
+        }
 
-    const response = await fetch(`${index.indexUrl}/query`, {
-      method: "POST",
-      headers: {
-        "Api-Key": index.apiKey,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        vector,
-        topK,
-        includeMetadata: true,
-        namespace,
-        filter,
-      }),
-    })
+        try {
+          // Validate vector dimension
+          validateVectorDimension(vector.values)
+          return true
+        } catch (error) {
+          logger.error("Rejecting invalid vector", {
+            vectorId: vector.id,
+            error: error instanceof Error ? error.message : "Unknown error",
+          })
+          return false
+        }
+      })
 
-    if (!response.ok) {
-      const errorText = await response.text()
-      const error: any = new Error(`Pinecone query failed: ${response.status} ${response.statusText} - ${errorText}`)
-      error.status = response.status
+      // If no valid vectors remain, return early
+      if (validVectors.length === 0) {
+        logger.warn("No valid vectors to upsert")
+        return { upsertedCount: 0 }
+      }
+
+      // Process in batches of 100
+      const BATCH_SIZE = 100
+      let totalUpserted = 0
+
+      for (let i = 0; i < validVectors.length; i += BATCH_SIZE) {
+        const batch = validVectors.slice(i, i + BATCH_SIZE)
+
+        const response = await fetch(`${host}/vectors/upsert`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Api-Key": apiKey,
+          },
+          body: JSON.stringify({ vectors: batch, namespace }),
+        })
+
+        if (!response.ok) {
+          const errorText = await response.text()
+          const error: any = new Error(`Upsert failed: ${response.status} ${response.statusText} - ${errorText}`)
+          error.status = response.status
+          throw error
+        }
+
+        const result = await response.json()
+        totalUpserted += batch.length
+
+        logger.info(`Successfully upserted batch of vectors`, {
+          batchSize: batch.length,
+          totalUpserted,
+          namespace: namespace || "default",
+        })
+      }
+
+      return { upsertedCount: totalUpserted }
+    } catch (error) {
+      logger.error("Upsert exception:", error)
       throw error
     }
-
-    return await response.json()
   })
 }
 
 /**
- * Upsert vectors to Pinecone with retry logic
+ * Query vectors from Pinecone
  *
- * @param vectors - Array of vectors to insert/update
- * @param namespace - Optional namespace
- * @returns Upsert result
+ * @param vector - Query vector
+ * @param topK - Maximum number of results
+ * @param includeMetadata - Whether to include metadata
+ * @param filter - Optional filter criteria
+ * @param namespace - Optional namespace (default: "")
+ * @returns Query results
  */
-export async function upsertVectorsWithRetry(
-  vectors: PineconeRecord[],
+export async function queryVectors(
+  vector: number[],
+  topK = 5,
+  includeMetadata = true,
+  filter?: PineconeFilter,
   namespace = "",
-): Promise<{ upsertedCount: number }> {
-  // Process in batches of 100
-  const BATCH_SIZE = 100
-  let totalUpserted = 0
+): Promise<QueryResponse> {
+  logger.info(`Querying Pinecone`, {
+    topK,
+    filter: filter ? JSON.stringify(filter).substring(0, 100) + "..." : "none",
+    namespace: namespace || "default",
+  })
 
-  for (let i = 0; i < vectors.length; i += BATCH_SIZE) {
-    const batch = vectors.slice(i, i + BATCH_SIZE)
+  return withRetry(async () => {
+    try {
+      const { apiKey, host } = getPineconeClient()
 
-    await withRetry(async () => {
-      const index = await getPineconeIndex()
+      // Validate query vector dimension
+      try {
+        validateVectorDimension(vector)
+      } catch (error) {
+        // If vector validation fails, use a placeholder vector for metadata-only queries
+        logger.warn(`Vector validation failed, using placeholder vector: ${error.message}`)
+        vector = createPlaceholderVector()
+      }
 
-      const response = await fetch(`${index.indexUrl}/vectors/upsert`, {
+      const queryBody: any = {
+        vector,
+        topK,
+        includeMetadata,
+        namespace,
+      }
+
+      if (filter) {
+        queryBody.filter = filter
+      }
+
+      const response = await fetch(`${host}/query`, {
         method: "POST",
         headers: {
-          "Api-Key": index.apiKey,
           "Content-Type": "application/json",
+          "Api-Key": apiKey,
         },
-        body: JSON.stringify({
-          vectors: batch,
-          namespace,
-        }),
+        body: JSON.stringify(queryBody),
       })
 
       if (!response.ok) {
         const errorText = await response.text()
-        const error: any = new Error(`Pinecone upsert failed: ${response.status} ${response.statusText} - ${errorText}`)
+        const error: any = new Error(`Query error: Status ${response.status} - ${errorText}`)
         error.status = response.status
         throw error
       }
 
       const result = await response.json()
-      totalUpserted += batch.length
-
-      logger.info(`Successfully upserted batch of vectors`, {
-        batchSize: batch.length,
-        totalUpserted,
+      logger.info(`Query successful`, {
+        matchCount: result.matches?.length || 0,
         namespace: namespace || "default",
       })
-
       return result
-    })
-  }
-
-  return { upsertedCount: totalUpserted }
-}
-
-/**
- * Delete vectors from Pinecone with retry logic
- *
- * @param ids - Array of vector IDs to delete
- * @param namespace - Optional namespace
- * @returns Delete result
- */
-export async function deleteVectorsWithRetry(ids: string[], namespace = ""): Promise<{ deletedCount: number }> {
-  return withRetry(async () => {
-    const index = await getPineconeIndex()
-
-    const response = await fetch(`${index.indexUrl}/vectors/delete`, {
-      method: "POST",
-      headers: {
-        "Api-Key": index.apiKey,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        ids,
-        namespace,
-      }),
-    })
-
-    if (!response.ok) {
-      const errorText = await response.text()
-      const error: any = new Error(`Pinecone delete failed: ${response.status} ${response.statusText} - ${errorText}`)
-      error.status = response.status
-      throw error
+    } catch (error) {
+      logger.error("Query exception:", error)
+      // Return empty matches instead of throwing to provide fallback behavior
+      return { matches: [], error: true, errorMessage: error instanceof Error ? error.message : String(error) }
     }
-
-    const result = await response.json()
-
-    logger.info(`Successfully deleted vectors`, {
-      deletedCount: ids.length,
-      namespace: namespace || "default",
-    })
-
-    return { deletedCount: ids.length }
   })
 }
 
 /**
- * Check Pinecone health
+ * Delete vectors from Pinecone
+ *
+ * @param ids - Array of vector IDs to delete
+ * @param namespace - Optional namespace (default: "")
+ * @returns Delete result
+ */
+export async function deleteVectors(ids: string[], namespace = ""): Promise<{ deletedCount: number }> {
+  logger.info(`Deleting ${ids.length} vectors from Pinecone`, {
+    namespace: namespace || "default",
+  })
+
+  return withRetry(async () => {
+    try {
+      const { apiKey, host } = getPineconeClient()
+
+      // Ensure ids is an array before proceeding
+      const safeIds = Array.isArray(ids) ? ids : []
+
+      if (safeIds.length === 0) {
+        logger.warn("No valid IDs to delete")
+        return { deletedCount: 0 }
+      }
+
+      const response = await fetch(`${host}/vectors/delete`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Api-Key": apiKey,
+        },
+        body: JSON.stringify({ ids: safeIds, namespace }),
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        const error: any = new Error(`Delete failed: ${response.status} ${response.statusText} - ${errorText}`)
+        error.status = response.status
+        throw error
+      }
+
+      const result = await response.json()
+      logger.info(`Successfully deleted vectors`, {
+        deletedCount: safeIds.length,
+        namespace: namespace || "default",
+        result,
+      })
+      return { deletedCount: safeIds.length }
+    } catch (error) {
+      logger.error("Delete exception:", error)
+      throw error
+    }
+  })
+}
+
+/**
+ * Create a health check query to verify Pinecone connectivity
  *
  * @returns Health check result
  */
 export async function healthCheck(): Promise<{ healthy: boolean; error?: string }> {
   try {
-    const index = await getPineconeIndex()
+    const { apiKey, host } = getPineconeClient()
 
-    // Create a minimal query to check connectivity
-    const dummyVector = Array(VECTOR_DIMENSION)
-      .fill(0)
-      .map(() => Math.random() * 0.001)
+    // Log the host for debugging (safely)
+    logger.info(`Performing health check with host: ${host}`)
 
-    const response = await fetch(`${index.indexUrl}/query`, {
+    // Create a minimal vector for the health check
+    const dummyVector = createPlaceholderVector()
+
+    // Make a minimal query to check connectivity
+    const response = await fetch(`${host}/query`, {
       method: "POST",
       headers: {
-        "Api-Key": index.apiKey,
         "Content-Type": "application/json",
+        "Api-Key": apiKey,
       },
       body: JSON.stringify({
         vector: dummyVector,
@@ -352,6 +419,7 @@ export async function healthCheck(): Promise<{ healthy: boolean; error?: string 
 
     if (!response.ok) {
       const errorText = await response.text()
+      logger.error(`Health check failed: ${response.status} - ${errorText}`, { host })
       return {
         healthy: false,
         error: `Health check failed: ${response.status} ${response.statusText} - ${errorText}`,
@@ -361,6 +429,7 @@ export async function healthCheck(): Promise<{ healthy: boolean; error?: string 
     return { healthy: true }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
+    logger.error("Health check exception:", { error: errorMessage })
     return {
       healthy: false,
       error: `Health check exception: ${errorMessage}`,

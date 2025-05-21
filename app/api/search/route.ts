@@ -19,7 +19,7 @@ import { withErrorHandling } from "@/utils/errorHandling"
 import { handleApiRequest } from "@/utils/apiRequest"
 import { ValidationError } from "@/utils/validation"
 import { generateEmbedding } from "@/lib/embedding-service"
-import { queryPineconeWithRetry, upsertVectorsWithRetry } from "@/lib/pinecone-client"
+import { queryVectors, upsertVectors, createPlaceholderVector } from "@/lib/pinecone-client"
 import { logger } from "@/lib/utils/logger"
 
 // Ensure the Edge runtime is declared
@@ -68,11 +68,9 @@ export const GET = withErrorHandling(async (request: NextRequest) => {
 
       try {
         // Log search query for analytics
-        const placeholderVector = Array(3072)
-          .fill(0)
-          .map(() => Math.random() * 0.001)
+        const placeholderVector = createPlaceholderVector()
 
-        await upsertVectorsWithRetry([
+        await upsertVectors([
           {
             id: `search_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
             values: placeholderVector,
@@ -126,7 +124,7 @@ export const GET = withErrorHandling(async (request: NextRequest) => {
           }
 
           // Query Pinecone
-          const response = await queryPineconeWithRetry(embedding, 10, filter)
+          const response = await queryVectors(embedding, 10, true, filter)
 
           // Format results
           if (response.matches && Array.isArray(response.matches)) {

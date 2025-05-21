@@ -13,7 +13,7 @@
  * Designed to work with Vercel Edge functions and Pinecone Serverless.
  *
  * Dependencies:
- * - @/lib/pinecone-rest-client for vector database operations
+ * - @/lib/pinecone-client for vector database operations
  * - @/lib/embedding-service for embedding generation
  * - @/lib/chunking-utils for document text processing
  * - @/lib/utils/logger for structured logging
@@ -21,7 +21,7 @@
  * @module lib/document-service
  */
 
-import { upsertVectors, queryVectors, deleteVectors, createPlaceholderVector } from "@/lib/pinecone-rest-client"
+import { upsertVectors, queryVectors, deleteVectors, createPlaceholderVector } from "@/lib/pinecone-client"
 import { generateEmbedding } from "@/lib/embedding-service"
 import { chunkDocument } from "@/lib/chunking-utils"
 import { EMBEDDING_MODEL } from "@/lib/embedding-config"
@@ -81,20 +81,28 @@ export async function createDocument(
   // Create a placeholder vector with small non-zero values
   const placeholderVector = createPlaceholderVector()
 
-  await upsertVectors([
-    {
-      id: documentId, // FIXED: Use consistent ID pattern with no prefix
-      values: placeholderVector, // Non-zero placeholder vector
-      metadata: {
-        ...document,
-        record_type: "document", // Consistent record_type field
+  try {
+    await upsertVectors([
+      {
+        id: documentId, // FIXED: Use consistent ID pattern with no prefix
+        values: placeholderVector, // Non-zero placeholder vector
+        metadata: {
+          ...document,
+          record_type: "document", // Consistent record_type field
+        },
       },
-    },
-  ])
+    ])
 
-  logger.info(`Document record created successfully`, { documentId, userId })
-
-  return document
+    logger.info(`Document record created successfully`, { documentId, userId })
+    return document
+  } catch (error) {
+    logger.error(`Failed to create document record`, {
+      documentId,
+      userId,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    throw error
+  }
 }
 
 /**
@@ -126,18 +134,25 @@ export async function updateDocumentBlobUrl(documentId: string, blobUrl: string)
   // Create a non-zero placeholder vector
   const placeholderVector = createPlaceholderVector()
 
-  await upsertVectors([
-    {
-      id: documentId,
-      values: placeholderVector,
-      metadata: {
-        ...updatedDocument,
-        record_type: "document",
+  try {
+    await upsertVectors([
+      {
+        id: documentId,
+        values: placeholderVector,
+        metadata: {
+          ...updatedDocument,
+          record_type: "document",
+        },
       },
-    },
-  ])
-
-  return updatedDocument
+    ])
+    return updatedDocument
+  } catch (error) {
+    logger.error(`Failed to update document blob URL`, {
+      documentId,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    throw error
+  }
 }
 
 /**
@@ -152,44 +167,52 @@ export async function getDocumentsByUserId(userId: string): Promise<Document[]> 
   // Create a placeholder vector with non-zero values
   const placeholderVector = createPlaceholderVector()
 
-  const response = await queryVectors(
-    placeholderVector, // Using correct non-zero vector
-    100,
-    true,
-    {
-      user_id: { $eq: userId },
-      record_type: { $eq: "document" },
-    },
-  )
+  try {
+    const response = await queryVectors(
+      placeholderVector, // Using correct non-zero vector
+      100,
+      true,
+      {
+        user_id: { $eq: userId },
+        record_type: { $eq: "document" },
+      },
+    )
 
-  // Handle potential error from Pinecone
-  if ("error" in response && response.error) {
-    logger.error("Error querying documents from Pinecone:", response)
-    return [] // Return empty array as fallback
+    // Handle potential error from Pinecone
+    if ("error" in response && response.error) {
+      logger.error("Error querying documents from Pinecone:", response)
+      return [] // Return empty array as fallback
+    }
+
+    // Ensure matches is an array before mapping
+    const matches = Array.isArray(response.matches) ? response.matches : []
+
+    const documents = matches.map((match) => ({
+      id: match.id,
+      user_id: match.metadata?.user_id as string,
+      name: match.metadata?.name as string,
+      description: match.metadata?.description as string,
+      file_type: match.metadata?.file_type as string,
+      file_size: match.metadata?.file_size as number,
+      file_path: match.metadata?.file_path as string,
+      blob_url: match.metadata?.blob_url as string | undefined,
+      status: match.metadata?.status as "processing" | "indexed" | "failed",
+      processing_progress: match.metadata?.processing_progress as number,
+      error_message: match.metadata?.error_message as string | undefined,
+      created_at: match.metadata?.created_at as string,
+      updated_at: match.metadata?.updated_at as string,
+      debug_info: match.metadata?.debug_info as Record<string, any> | undefined,
+    }))
+
+    logger.info(`Found ${documents.length} documents for user`, { userId })
+    return documents
+  } catch (error) {
+    logger.error(`Error fetching documents for user`, {
+      userId,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return [] // Return empty array on error
   }
-
-  // Ensure matches is an array before mapping
-  const matches = Array.isArray(response.matches) ? response.matches : []
-
-  const documents = matches.map((match) => ({
-    id: match.id,
-    user_id: match.metadata?.user_id as string,
-    name: match.metadata?.name as string,
-    description: match.metadata?.description as string,
-    file_type: match.metadata?.file_type as string,
-    file_size: match.metadata?.file_size as number,
-    file_path: match.metadata?.file_path as string,
-    blob_url: match.metadata?.blob_url as string | undefined,
-    status: match.metadata?.status as "processing" | "indexed" | "failed",
-    processing_progress: match.metadata?.processing_progress as number,
-    error_message: match.metadata?.error_message as string | undefined,
-    created_at: match.metadata?.created_at as string,
-    updated_at: match.metadata?.updated_at as string,
-    debug_info: match.metadata?.debug_info as Record<string, any> | undefined,
-  }))
-
-  logger.info(`Found ${documents.length} documents for user`, { userId })
-  return documents
 }
 
 /**
@@ -202,43 +225,51 @@ export async function getDocumentById(id: string): Promise<Document | null> {
   // Create a placeholder vector with small non-zero values
   const placeholderVector = createPlaceholderVector()
 
-  const response = await queryVectors(
-    placeholderVector, // Non-zero placeholder vector
-    1,
-    true,
-    {
-      id: { $eq: id },
-      record_type: { $eq: "document" },
-    },
-  )
+  try {
+    const response = await queryVectors(
+      placeholderVector, // Non-zero placeholder vector
+      1,
+      true,
+      {
+        id: { $eq: id },
+        record_type: { $eq: "document" },
+      },
+    )
 
-  // Handle potential error from Pinecone
-  if ("error" in response && response.error) {
-    logger.error("Error querying document from Pinecone:", response)
-    return null // Return null as fallback
-  }
+    // Handle potential error from Pinecone
+    if ("error" in response && response.error) {
+      logger.error("Error querying document from Pinecone:", response)
+      return null // Return null as fallback
+    }
 
-  if (!response.matches || response.matches.length === 0) {
-    return null
-  }
+    if (!response.matches || response.matches.length === 0) {
+      return null
+    }
 
-  const match = response.matches[0]
+    const match = response.matches[0]
 
-  return {
-    id: match.id,
-    user_id: match.metadata?.user_id as string,
-    name: match.metadata?.name as string,
-    description: match.metadata?.description as string,
-    file_type: match.metadata?.file_type as string,
-    file_size: match.metadata?.file_size as number,
-    file_path: match.metadata?.file_path as string,
-    blob_url: match.metadata?.blob_url as string | undefined,
-    status: match.metadata?.status as "processing" | "indexed" | "failed",
-    processing_progress: match.metadata?.processing_progress as number,
-    error_message: match.metadata?.error_message as string | undefined,
-    created_at: match.metadata?.created_at as string,
-    updated_at: match.metadata?.updated_at as string,
-    debug_info: match.metadata?.debug_info as Record<string, any> | undefined,
+    return {
+      id: match.id,
+      user_id: match.metadata?.user_id as string,
+      name: match.metadata?.name as string,
+      description: match.metadata?.description as string,
+      file_type: match.metadata?.file_type as string,
+      file_size: match.metadata?.file_size as number,
+      file_path: match.metadata?.file_path as string,
+      blob_url: match.metadata?.blob_url as string | undefined,
+      status: match.metadata?.status as "processing" | "indexed" | "failed",
+      processing_progress: match.metadata?.processing_progress as number,
+      error_message: match.metadata?.error_message as string | undefined,
+      created_at: match.metadata?.created_at as string,
+      updated_at: match.metadata?.updated_at as string,
+      debug_info: match.metadata?.debug_info as Record<string, any> | undefined,
+    }
+  } catch (error) {
+    logger.error(`Error fetching document by ID`, {
+      id,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return null // Return null on error
   }
 }
 
@@ -286,18 +317,27 @@ export async function updateDocumentStatus(
   // Create a non-zero placeholder vector
   const placeholderVector = createPlaceholderVector()
 
-  await upsertVectors([
-    {
-      id: documentId, // FIXED: Use consistent ID pattern with no prefix
-      values: placeholderVector,
-      metadata: {
-        ...updatedDocument,
-        record_type: "document",
+  try {
+    await upsertVectors([
+      {
+        id: documentId, // FIXED: Use consistent ID pattern with no prefix
+        values: placeholderVector,
+        metadata: {
+          ...updatedDocument,
+          record_type: "document",
+        },
       },
-    },
-  ])
-
-  return updatedDocument
+    ])
+    return updatedDocument
+  } catch (error) {
+    logger.error(`Failed to update document status`, {
+      documentId,
+      status,
+      progress,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    throw error
+  }
 }
 
 /**
@@ -410,16 +450,16 @@ export async function processDocument({
         logger.info(`Backing off for ${backoffTime}ms before retry`, { documentId, retries })
         await new Promise((resolve) => setTimeout(resolve, backoffTime))
         retries++
-      } catch (fetchError) {
+      } catch (error) {
         logger.error(`Fetch attempt ${retries + 1} failed with error`, {
           documentId,
-          error: fetchError instanceof Error ? fetchError.message : "Unknown error",
+          error: error instanceof Error ? error.message : "Unknown error",
           attempt: retries + 1,
           maxRetries: MAX_RETRIES,
         })
 
         if (retries >= MAX_RETRIES - 1) {
-          fetchError = fetchError instanceof Error ? fetchError.message : "Unknown fetch error"
+          fetchError = error instanceof Error ? error.message : "Unknown fetch error"
           break
         }
 
@@ -614,19 +654,28 @@ export async function processDocument({
       const batchNumber = Math.floor(i / EMBEDDING_BATCH_SIZE) + 1
       const totalBatches = Math.ceil(chunks.length / EMBEDDING_BATCH_SIZE)
 
-      await updateDocumentStatus(
-        documentId,
-        "processing",
-        batchProgress,
-        `Processing batch ${batchNumber}/${totalBatches}`,
-        {
-          ...debugInfo,
-          currentStep: "embedding",
-          currentBatch: batchNumber,
-          totalBatches,
-          progress: batchProgress,
-        },
-      )
+      // Update status more frequently to prevent "stuck at 0%" issues
+      try {
+        await updateDocumentStatus(
+          documentId,
+          "processing",
+          batchProgress,
+          `Processing batch ${batchNumber}/${totalBatches}`,
+          {
+            ...debugInfo,
+            currentStep: "embedding",
+            currentBatch: batchNumber,
+            totalBatches,
+            progress: batchProgress,
+          },
+        )
+      } catch (statusUpdateError) {
+        // Log but continue processing even if status update fails
+        logger.error(`Failed to update document status for batch ${batchNumber}`, {
+          documentId,
+          error: statusUpdateError instanceof Error ? statusUpdateError.message : String(statusUpdateError),
+        })
+      }
 
       logger.info(`Processing document: Generating embeddings for batch`, {
         documentId,
@@ -876,29 +925,37 @@ export async function processDocument({
     const existingDoc = await getDocumentById(documentId)
     const blobUrl = existingDoc?.blob_url
 
-    await upsertVectors([
-      {
-        id: documentId, // FIXED: Use consistent ID pattern with no prefix
-        values: placeholderVector,
-        metadata: {
-          id: documentId,
-          user_id: userId,
-          name: fileName,
-          file_type: fileType,
-          file_size: text.length,
-          file_path: filePath,
-          blob_url: blobUrl, // Preserve blob URL if it exists
-          status: "indexed",
-          processing_progress: 100,
-          chunk_count: successfulEmbeddings,
-          embedding_model: EMBEDDING_MODEL,
-          created_at: existingDoc?.created_at || new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          record_type: "document",
-          debug_info: debugInfo,
+    try {
+      await upsertVectors([
+        {
+          id: documentId, // FIXED: Use consistent ID pattern with no prefix
+          values: placeholderVector,
+          metadata: {
+            id: documentId,
+            user_id: userId,
+            name: fileName,
+            file_type: fileType,
+            file_size: text.length,
+            file_path: filePath,
+            blob_url: blobUrl, // Preserve blob URL if it exists
+            status: "indexed",
+            processing_progress: 100,
+            chunk_count: successfulEmbeddings,
+            embedding_model: EMBEDDING_MODEL,
+            created_at: existingDoc?.created_at || new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            record_type: "document",
+            debug_info: debugInfo,
+          },
         },
-      },
-    ])
+      ])
+    } catch (finalUpdateError) {
+      logger.error(`Failed to update final document status`, {
+        documentId,
+        error: finalUpdateError instanceof Error ? finalUpdateError.message : String(finalUpdateError),
+      })
+      // Continue even if final update fails - the document is still processed
+    }
 
     debugInfo.timings.finalUpdateTime = performance.now() - finalUpdateStartTime
 
@@ -967,22 +1024,30 @@ export async function processDocument({
  * @param id - Document ID
  */
 export async function deleteDocument(id: string): Promise<void> {
-  // Delete the document
-  await deleteVectors([id]) // FIXED: Use consistent ID pattern with no prefix
+  try {
+    // Delete the document
+    await deleteVectors([id]) // FIXED: Use consistent ID pattern with no prefix
 
-  // Create a placeholder vector with small non-zero values
-  const placeholderVector = createPlaceholderVector()
+    // Create a placeholder vector with small non-zero values
+    const placeholderVector = createPlaceholderVector()
 
-  // Find all chunks for this document
-  const response = await queryVectors(placeholderVector, 1000, true, {
-    document_id: { $eq: id },
-    record_type: { $eq: "chunk" },
-  })
+    // Find all chunks for this document
+    const response = await queryVectors(placeholderVector, 1000, true, {
+      document_id: { $eq: id },
+      record_type: { $eq: "chunk" },
+    })
 
-  // Delete all chunks
-  if (response.matches && response.matches.length > 0) {
-    const chunkIds = response.matches.map((match) => match.id)
-    await deleteVectors(chunkIds)
+    // Delete all chunks
+    if (response.matches && response.matches.length > 0) {
+      const chunkIds = response.matches.map((match) => match.id)
+      await deleteVectors(chunkIds)
+    }
+  } catch (error) {
+    logger.error(`Failed to delete document`, {
+      id,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    throw error
   }
 }
 

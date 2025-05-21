@@ -8,15 +8,14 @@
  * - Search analytics logging
  *
  * Dependencies:
- * - @/lib/pinecone-rest-client.ts for vector storage and retrieval
+ * - @/lib/pinecone-client.ts for vector storage and retrieval
  * - @/lib/embedding-service.ts for embeddings
  * - uuid for ID generation
  */
 
 import { v4 as uuidv4 } from "uuid"
-import { upsertVectors, queryVectors } from "@/lib/pinecone-rest-client"
+import { upsertVectors, queryVectors, createPlaceholderVector } from "@/lib/pinecone-client"
 import { generateEmbedding } from "@/lib/embedding-service"
-import { VECTOR_DIMENSION } from "@/lib/embedding-config"
 import type { SearchOptions, SearchResult } from "@/types"
 
 // Constants
@@ -28,12 +27,12 @@ const MAX_KEYWORD_RESULTS = 100
  */
 export async function getSearchCountByUserId(userId: string): Promise<number> {
   try {
-    // Create a zero vector with the correct dimension
-    const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+    // Create a placeholder vector with the correct dimension
+    const placeholderVector = createPlaceholderVector()
 
     // Query Pinecone for search history with the specified user_id
     const response = await queryVectors(
-      zeroVector,
+      placeholderVector,
       10000, // Use a high limit, but be aware of potential truncation
       true,
       {
@@ -133,13 +132,13 @@ export async function logSearchQuery(
   filters: Record<string, any>,
 ): Promise<void> {
   try {
-    // Create a zero vector with the correct dimension
-    const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+    // Create a placeholder vector with the correct dimension
+    const placeholderVector = createPlaceholderVector()
 
     await upsertVectors([
       {
         id: uuidv4(),
-        values: zeroVector, // Zero vector with correct dimension
+        values: placeholderVector,
         metadata: {
           user_id: userId,
           query,
@@ -241,8 +240,8 @@ async function keywordSearch(query: string, userId: string, options: SearchOptio
       }
     }
 
-    // Create a zero vector with the correct dimension
-    const zeroVector = new Array(VECTOR_DIMENSION).fill(0)
+    // Create a placeholder vector
+    const placeholderVector = createPlaceholderVector()
 
     // Get all chunks for this user with the applied filters
     console.log("Querying Pinecone for keyword search", {
@@ -250,12 +249,7 @@ async function keywordSearch(query: string, userId: string, options: SearchOptio
       filter: JSON.stringify(filter).substring(0, 100) + "...",
     })
 
-    const response = await queryVectors(
-      zeroVector, // Zero vector with correct dimension
-      MAX_KEYWORD_RESULTS,
-      true,
-      filter,
-    )
+    const response = await queryVectors(placeholderVector, MAX_KEYWORD_RESULTS, true, filter)
 
     // Handle potential error from Pinecone
     if ("error" in response && response.error) {
