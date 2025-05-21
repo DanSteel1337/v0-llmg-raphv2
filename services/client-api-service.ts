@@ -1,546 +1,903 @@
-/**
- * Client API Service
- *
- * Service layer for client-side API interactions with the backend.
- * Provides standardized methods for handling HTTP requests to all API endpoints.
- * 
- * Features:
- * - Document management (upload, retrieve, delete)
- * - Chat conversations and messages
- * - Search functionality
- * - Analytics data retrieval
- * - Health checks
- * 
- * Dependencies:
- * - apiCall utility for standardized request handling
- * - Type definitions for proper type safety
- * 
- * @module services/client-api-service
- */
+import type { Document, DocumentStats, Conversation, Message, SearchResult, AnalyticsData } from "@/types"
 
-import { apiCall } from "./apiCall"
-import type { Document, AnalyticsData, Conversation, Message, SearchResult, SearchOptions } from "@/types"
-
-/**
- * Fetch documents for a user
- *
- * @param userId User ID to fetch documents for
- * @returns Array of documents
- */
-export async function fetchDocuments(userId: string): Promise<Document[]> {
-  try {
-    if (!userId) {
-      console.error("fetchDocuments called without userId")
-      return []
-    }
-
-    console.log(`Fetching documents for user ${userId}`)
-    const response = await apiCall<{ success: boolean; documents: Document[] }>(
-      `/api/documents?userId=${encodeURIComponent(userId)}`,
-    )
-
-    if (!response || !response.success || !response.documents) {
-      console.warn("Received invalid response from documents API", { response })
-      return []
-    }
-
-    return Array.isArray(response.documents) ? response.documents : []
-  } catch (error) {
-    console.error("Error fetching documents:", error)
-    throw error
+// Response Types
+export interface ApiResponse<T> {
+  success: boolean
+  data?: T
+  error?: string
+  pagination?: {
+    total: number
+    page: number
+    limit: number
+    totalPages: number
   }
 }
 
+export interface DocumentListResponse {
+  documents: Document[]
+  pagination: {
+    total: number
+    page: number
+    limit: number
+    totalPages: number
+  }
+  stats?: DocumentStats
+}
+
+export interface DocumentResponse {
+  document: Document
+}
+
+export interface DocumentUploadResponse {
+  document: Document
+  uploadUrl?: string
+}
+
+export interface DocumentProcessingResponse {
+  document: Document
+  status: "processing" | "indexed" | "failed"
+  progress?: number
+  error?: string
+}
+
+export interface ConversationListResponse {
+  conversations: Conversation[]
+  pagination: {
+    total: number
+    page: number
+    limit: number
+    totalPages: number
+  }
+}
+
+export interface ConversationResponse {
+  conversation: Conversation
+}
+
+export interface MessageListResponse {
+  messages: Message[]
+  pagination: {
+    total: number
+    page: number
+    limit: number
+    totalPages: number
+  }
+}
+
+export interface MessageResponse {
+  message: Message
+}
+
+export interface SearchResults {
+  results: SearchResult[]
+  total: number
+  page: number
+  pageSize: number
+  totalPages: number
+  query: string
+  suggestions?: string[]
+  didYouMean?: string
+  timeTaken?: number
+}
+
+export interface AnalyticsResponse {
+  data: AnalyticsData
+  timeRange: string
+  filters?: Record<string, any>
+}
+
+export interface HealthCheckResult {
+  status: "healthy" | "degraded" | "unhealthy"
+  pineconeApiHealthy: boolean
+  openaiApiHealthy: boolean
+  uptime: number
+  version: string
+  errors?: {
+    pinecone?: string | null
+    openai?: string | null
+  }
+}
+
+// Error Types
+export class ClientApiError extends Error {
+  statusCode: number
+  isNetworkError: boolean
+  isTimeoutError: boolean
+  isServerError: boolean
+  originalError?: any
+
+  constructor(
+    message: string,
+    options: {
+      statusCode?: number
+      isNetworkError?: boolean
+      isTimeoutError?: boolean
+      isServerError?: boolean
+      originalError?: any
+    } = {},
+  ) {
+    super(message)
+    this.name = "ClientApiError"
+    this.statusCode = options.statusCode || 500
+    this.isNetworkError = options.isNetworkError || false
+    this.isTimeoutError = options.isTimeoutError || false
+    this.isServerError = options.isServerError || (options.statusCode ? options.statusCode >= 500 : false)
+    this.originalError = options.originalError
+  }
+}
+
+// Request Options Types
+export interface RequestOptions extends RequestInit {
+  timeout?: number
+  retries?: number
+  retryDelay?: number
+  params?: Record<string, any>
+}
+
+// Default request options
+const DEFAULT_OPTIONS: RequestOptions = {
+  timeout: 30000, // 30 seconds
+  retries: 2,
+  retryDelay: 1000, // 1 second
+}
+
+// Default headers
+const DEFAULT_HEADERS: HeadersInit = {
+  "Content-Type": "application/json",
+  Accept: "application/json",
+}
+
 /**
- * Upload a document
- *
- * @param userId User ID who owns the document
- * @param file File to upload
- * @param onProgress Optional progress callback
- * @returns Uploaded document metadata
+ * Builds a URL with query parameters
+ * @param endpoint - API endpoint
+ * @param params - Query parameters
+ * @returns Full URL with query parameters
+ */
+export function buildUrl(endpoint: string, params?: Record<string, any>): string {
+  if (!params || Object.keys(params).length === 0) {
+    return endpoint
+  }
+
+  const url = new URL(endpoint, window.location.origin)
+
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null) {
+      if (Array.isArray(value)) {
+        value.forEach((item) => url.searchParams.append(`${key}[]`, String(item)))
+      } else if (typeof value === "object" && value !== null) {
+        Object.entries(value).forEach(([subKey, subValue]) => {
+          if (subValue !== undefined && subValue !== null) {
+            url.searchParams.append(`${key}[${subKey}]`, String(subValue))
+          }
+        })
+      } else {
+        url.searchParams.append(key, String(value))
+      }
+    }
+  })
+
+  return url.toString()
+}
+
+/**
+ * Creates request options with default values
+ * @param method - HTTP method
+ * @param data - Request body data
+ * @param options - Additional request options
+ * @returns Request options
+ */
+export function createRequestOptions(
+  method: string,
+  data?: any,
+  options: RequestOptions = {},
+): RequestInit & { signal?: AbortSignal } {
+  const mergedOptions: RequestOptions = {
+    ...DEFAULT_OPTIONS,
+    ...options,
+    method,
+    headers: {
+      ...DEFAULT_HEADERS,
+      ...(options.headers || {}),
+    },
+  }
+
+  // Don't set content-type for FormData
+  if (data instanceof FormData) {
+    delete (mergedOptions.headers as any)["Content-Type"]
+  }
+
+  // Add body if data is provided
+  if (data) {
+    if (data instanceof FormData) {
+      mergedOptions.body = data
+    } else {
+      mergedOptions.body = JSON.stringify(data)
+    }
+  }
+
+  return mergedOptions
+}
+
+/**
+ * Handles API response with error checking
+ * @param response - Fetch Response object
+ * @returns Parsed response data
+ * @throws ClientApiError if response is not ok
+ */
+export async function handleResponse<T>(response: Response): Promise<T> {
+  // Check if response is ok (status 200-299)
+  if (!response.ok) {
+    let errorMessage = `Request failed with status: ${response.status}`
+    let errorData: any = null
+
+    try {
+      errorData = await response.json()
+      if (errorData && errorData.error) {
+        errorMessage = errorData.error
+      }
+    } catch (e) {
+      // If we can't parse the error response, use the default message
+    }
+
+    throw new ClientApiError(errorMessage, {
+      statusCode: response.status,
+      isServerError: response.status >= 500,
+      originalError: errorData,
+    })
+  }
+
+  // Check for empty response
+  const contentType = response.headers.get("content-type")
+  if (contentType && contentType.includes("application/json")) {
+    const data = await response.json()
+
+    // Check for API error format
+    if (data && data.success === false && data.error) {
+      throw new ClientApiError(data.error, {
+        statusCode: response.status,
+        originalError: data,
+      })
+    }
+
+    return data.data || data
+  }
+
+  // For non-JSON responses
+  return {} as T
+}
+
+/**
+ * Executes a fetch request with timeout, retries, and error handling
+ * @param url - Request URL
+ * @param options - Request options
+ * @returns Parsed response data
+ * @throws ClientApiError if request fails
+ */
+export async function fetchWithTimeout<T>(url: string, options: RequestOptions = {}): Promise<T> {
+  const { timeout, retries, retryDelay, params, ...fetchOptions } = {
+    ...DEFAULT_OPTIONS,
+    ...options,
+  }
+
+  // Create abort controller for timeout
+  const controller = new AbortController()
+  const { signal } = controller
+
+  // Set timeout
+  const timeoutId = setTimeout(() => {
+    controller.abort()
+  }, timeout)
+
+  // Build URL with query parameters
+  const fullUrl = buildUrl(url, params)
+
+  // Execute fetch with retries
+  let lastError: Error | null = null
+  let attempt = 0
+
+  while (attempt <= retries) {
+    try {
+      const response = await fetch(fullUrl, {
+        ...fetchOptions,
+        signal,
+      })
+
+      clearTimeout(timeoutId)
+      return await handleResponse<T>(response)
+    } catch (error) {
+      lastError = error as Error
+
+      // Don't retry if request was aborted or if we've reached max retries
+      if (error instanceof DOMException && error.name === "AbortError") {
+        clearTimeout(timeoutId)
+        throw new ClientApiError("Request timed out", {
+          isTimeoutError: true,
+          originalError: error,
+        })
+      }
+
+      // Don't retry client errors (4xx)
+      if (error instanceof ClientApiError && error.statusCode >= 400 && error.statusCode < 500) {
+        clearTimeout(timeoutId)
+        throw error
+      }
+
+      // If we've reached max retries, throw the last error
+      if (attempt >= retries) {
+        clearTimeout(timeoutId)
+        throw error
+      }
+
+      // Wait before retrying
+      await new Promise((resolve) => setTimeout(resolve, retryDelay))
+      attempt++
+    }
+  }
+
+  // This should never happen, but TypeScript requires it
+  clearTimeout(timeoutId)
+  throw lastError || new ClientApiError("Unknown error occurred")
+}
+
+/**
+ * Generic API request handler with error transformation
+ * @param requestFn - Function that performs the request
+ * @returns Response data
+ * @throws ClientApiError if request fails
+ */
+export async function handleApiRequest<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
+  try {
+    return await fetchWithTimeout<T>(endpoint, options)
+  } catch (error) {
+    if (error instanceof ClientApiError) {
+      throw error
+    }
+
+    if (error instanceof TypeError && error.message.includes("Failed to fetch")) {
+      throw new ClientApiError("Network error. Please check your connection.", {
+        isNetworkError: true,
+        originalError: error,
+      })
+    }
+
+    throw new ClientApiError(error instanceof Error ? error.message : "An unknown error occurred", {
+      originalError: error,
+    })
+  }
+}
+
+// Document-related functions
+
+/**
+ * Fetches documents with optional filtering and pagination
+ * @param userId - User ID
+ * @param options - Filter and pagination options
+ * @returns Document list response
+ */
+export async function fetchDocuments(
+  userId: string,
+  options: {
+    filters?: Record<string, any>
+    sort?: { field: string; direction: "asc" | "desc" }
+    pagination?: { limit: number; offset: number }
+  } = {},
+): Promise<DocumentListResponse> {
+  const { filters = {}, sort, pagination = { limit: 10, offset: 0 } } = options
+
+  const params: Record<string, any> = {
+    userId,
+    limit: pagination.limit,
+    offset: pagination.offset,
+    ...filters,
+  }
+
+  if (sort) {
+    params.sortField = sort.field
+    params.sortDirection = sort.direction
+  }
+
+  return handleApiRequest<DocumentListResponse>("/api/documents", {
+    method: "GET",
+    params,
+  })
+}
+
+/**
+ * Fetches a document by ID
+ * @param documentId - Document ID
+ * @param options - Request options
+ * @returns Document response
+ */
+export async function fetchDocumentById(
+  documentId: string,
+  options: { includeContent?: boolean; includeMetadata?: boolean } = {},
+): Promise<DocumentResponse> {
+  return handleApiRequest<DocumentResponse>(`/api/documents/${documentId}`, {
+    method: "GET",
+    params: options,
+  })
+}
+
+/**
+ * Uploads a document
+ * @param userId - User ID
+ * @param file - File to upload
+ * @param onProgress - Progress callback
+ * @param options - Upload options
+ * @returns Document upload response
  */
 export async function uploadDocument(
   userId: string,
   file: File,
   onProgress?: (progress: number) => void,
+  options: {
+    signal?: AbortSignal
+    tags?: string[]
+    visibility?: "public" | "private" | "shared"
+    description?: string
+  } = {},
 ): Promise<Document> {
-  try {
-    // Validate inputs
-    if (!userId) throw new Error("User ID is required")
-    if (!file) throw new Error("File is required")
+  const formData = new FormData()
+  formData.append("file", file)
+  formData.append("userId", userId)
 
-    // Step 1: Create document metadata
-    console.log("Creating document metadata...", {
-      userId,
-      fileName: file.name,
-      fileType: file.type,
-      fileSize: file.size,
-    })
-
-    const createResponse = await apiCall<{ success: boolean; document: Document }>("/api/documents", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        userId,
-        name: file.name,
-        fileType: file.type || "text/plain",
-        fileSize: file.size,
-        filePath: `${userId}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, "_")}`,
-      }),
-    })
-
-    // Validate document response
-    if (!createResponse.success || !createResponse.document?.id || !createResponse.document?.file_path) {
-      console.error("Document creation failed - missing fields:", createResponse)
-      throw new Error("Document creation failed: Missing document ID or file path")
-    }
-
-    const document = createResponse.document
-    console.log("Document metadata created successfully:", {
-      documentId: document.id,
-      filePath: document.file_path,
-    })
-
-    // Step 2: Upload the file content
-    console.log("Uploading file content...", {
-      documentId: document.id,
-      filePath: document.file_path,
-    })
-
-    const formData = new FormData()
-    formData.append("file", file)
-    formData.append("userId", userId)
-    formData.append("documentId", document.id)
-    formData.append("filePath", document.file_path)
-
-    const uploadResponse = await apiCall<{
-      success: boolean
-      fileUrl: string
-      blobUrl?: string
-    }>("/api/documents/upload", {
-      method: "POST",
-      body: formData,
-    })
-
-    if (!uploadResponse.success) {
-      console.error("File upload failed:", uploadResponse)
-      throw new Error("File upload failed")
-    }
-
-    // Prioritize blobUrl if available, fall back to fileUrl
-    const fileUrl =
-      uploadResponse.blobUrl ||
-      uploadResponse.fileUrl ||
-      `/api/documents/file?path=${encodeURIComponent(document.file_path)}`
-
-    console.log("File uploaded successfully:", {
-      documentId: document.id,
-      filePath: document.file_path,
-      fileUrl,
-      hasBlobUrl: !!uploadResponse.blobUrl,
-    })
-
-    // Step 3: Process the document
-    console.log("Triggering document processing...", {
-      documentId: document.id,
-      filePath: document.file_path,
-      fileUrl,
-    })
-
-    try {
-      const processResponse = await apiCall<{ success: boolean; status?: string; message?: string; error?: string }>(
-        "/api/documents/process",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            documentId: document.id,
-            userId,
-            filePath: document.file_path,
-            fileName: file.name,
-            fileType: file.type || "text/plain",
-            fileUrl,
-          }),
-        },
-      )
-
-      // Log the full response for debugging
-      console.log("Document processing response:", processResponse)
-
-      if (!processResponse || processResponse.success !== true) {
-        const errorMessage = processResponse?.error || "Unknown error"
-        console.error("Document processing failed to start:", { error: errorMessage, response: processResponse })
-        throw new Error(`Failed to start document processing: ${errorMessage}`)
-      }
-
-      console.log("Document processing triggered:", {
-        documentId: document.id,
-        filePath: document.file_path,
-        fileUrl,
-        status: processResponse.status || "processing",
-      })
-    } catch (processError) {
-      console.error("Error triggering document processing:", processError)
-      throw new Error(
-        `Failed to start document processing: ${
-          processError instanceof Error ? processError.message : "Unknown error"
-        }`,
-      )
-    }
-
-    // Poll for document status updates if progress callback provided
-    if (onProgress) {
-      const pollInterval = setInterval(async () => {
-        try {
-          const documents = await fetchDocuments(userId)
-          const updatedDocument = documents.find((d) => d.id === document.id)
-
-          if (updatedDocument) {
-            if (updatedDocument.status === "indexed" || updatedDocument.status === "failed") {
-              clearInterval(pollInterval)
-              onProgress(updatedDocument.status === "indexed" ? 100 : 0)
-              console.log("Document processing completed:", {
-                documentId: document.id,
-                status: updatedDocument.status,
-                message: updatedDocument.error_message || "Success",
-              })
-            } else if (updatedDocument.processing_progress !== undefined) {
-              onProgress(updatedDocument.processing_progress)
-              console.log("Document processing progress:", {
-                documentId: document.id,
-                progress: updatedDocument.processing_progress,
-              })
-            }
-          }
-        } catch (error) {
-          console.error("Error polling document status:", error)
-        }
-      }, 2000)
-
-      // Clean up interval after 5 minutes (max processing time)
-      setTimeout(() => clearInterval(pollInterval), 5 * 60 * 1000)
-    }
-
-    return document
-  } catch (error) {
-    console.error("Document upload pipeline failed:", error)
-    throw error
+  if (options.tags) {
+    formData.append("tags", JSON.stringify(options.tags))
   }
+
+  if (options.visibility) {
+    formData.append("visibility", options.visibility)
+  }
+
+  if (options.description) {
+    formData.append("description", options.description)
+  }
+
+  // If progress tracking is requested, use XMLHttpRequest instead of fetch
+  if (onProgress) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest()
+
+      xhr.open("POST", "/api/documents/upload")
+
+      // Set up progress tracking
+      xhr.upload.addEventListener("progress", (event) => {
+        if (event.lengthComputable) {
+          const progress = Math.round((event.loaded / event.total) * 100)
+          onProgress(progress)
+        }
+      })
+
+      // Handle completion
+      xhr.addEventListener("load", () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const response = JSON.parse(xhr.responseText)
+            resolve(response.data || response)
+          } catch (error) {
+            reject(
+              new ClientApiError("Failed to parse response", {
+                statusCode: xhr.status,
+                originalError: error,
+              }),
+            )
+          }
+        } else {
+          let errorMessage = `Upload failed with status: ${xhr.status}`
+          try {
+            const errorResponse = JSON.parse(xhr.responseText)
+            if (errorResponse && errorResponse.error) {
+              errorMessage = errorResponse.error
+            }
+          } catch (e) {
+            // If we can't parse the error response, use the default message
+          }
+
+          reject(
+            new ClientApiError(errorMessage, {
+              statusCode: xhr.status,
+              isServerError: xhr.status >= 500,
+            }),
+          )
+        }
+      })
+
+      // Handle errors
+      xhr.addEventListener("error", () => {
+        reject(
+          new ClientApiError("Network error during upload", {
+            isNetworkError: true,
+          }),
+        )
+      })
+
+      xhr.addEventListener("abort", () => {
+        reject(
+          new ClientApiError("Upload was aborted", {
+            statusCode: 0,
+          }),
+        )
+      })
+
+      // Handle timeout
+      xhr.addEventListener("timeout", () => {
+        reject(
+          new ClientApiError("Upload timed out", {
+            isTimeoutError: true,
+          }),
+        )
+      })
+
+      // Set timeout
+      xhr.timeout = 60000 // 60 seconds
+
+      // Send the request
+      xhr.send(formData)
+
+      // Set up abort handling
+      if (options.signal) {
+        options.signal.addEventListener("abort", () => {
+          xhr.abort()
+        })
+      }
+    })
+  }
+
+  // Use standard fetch for uploads without progress tracking
+  return handleApiRequest<Document>("/api/documents/upload", {
+    method: "POST",
+    body: formData,
+    signal: options.signal,
+  })
 }
 
 /**
- * Delete a document
- *
- * @param id Document ID to delete
- * @returns Success indicator
+ * Deletes a document
+ * @param documentId - Document ID
+ * @returns Success status
  */
-export async function deleteDocument(id: string): Promise<{ success: boolean }> {
-  if (!id) {
-    console.error("deleteDocument called without documentId")
-    throw new Error("Document ID is required")
-  }
-
-  return await apiCall<{ success: boolean }>(`/api/documents/${encodeURIComponent(id)}`, {
+export async function deleteDocument(documentId: string): Promise<boolean> {
+  const response = await handleApiRequest<{ success: boolean }>(`/api/documents/${documentId}`, {
     method: "DELETE",
   })
+
+  return response.success
 }
 
 /**
- * Retry document processing
- *
- * @param documentId Document ID to retry processing for
- * @returns Success indicator
+ * Retries document processing
+ * @param documentId - Document ID
+ * @param options - Processing options
+ * @returns Document processing response
  */
-export async function retryDocumentProcessing(documentId: string): Promise<{ success: boolean }> {
-  if (!documentId) {
-    console.error("retryDocumentProcessing called without documentId")
-    throw new Error("Document ID is required")
-  }
-
-  return await apiCall<{ success: boolean }>("/api/documents/retry", {
+export async function retryDocumentProcessing(
+  documentId: string,
+  options: { priority?: "high" | "normal" | "low" } = {},
+): Promise<DocumentProcessingResponse> {
+  return handleApiRequest<DocumentProcessingResponse>("/api/documents/retry", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ documentId }),
+    body: {
+      documentId,
+      ...options,
+    },
   })
 }
 
 /**
- * Fetch analytics data
- *
- * @param userId User ID to fetch analytics for
- * @param timeframe Optional timeframe filter
- * @returns Analytics data
+ * Updates document metadata
+ * @param documentId - Document ID
+ * @param metadata - Metadata to update
+ * @returns Updated document
  */
-export async function fetchAnalytics(userId: string, timeframe?: string): Promise<AnalyticsData> {
-  try {
-    if (!userId) {
-      console.error("fetchAnalytics called without userId")
-      return { 
-        documentCount: 0, 
-        chunkCount: 0, 
-        searchCount: 0, 
-        chatCount: 0, 
-        topDocuments: [], 
-        topSearches: [] 
-      }
-    }
-
-    const url = `/api/analytics?userId=${encodeURIComponent(userId)}${timeframe ? `&timeframe=${timeframe}` : ""}`
-    const response = await apiCall<AnalyticsData>(url)
-
-    return response
-  } catch (error) {
-    console.error("Error fetching analytics:", error)
-    return { 
-      documentCount: 0, 
-      chunkCount: 0, 
-      searchCount: 0, 
-      chatCount: 0, 
-      topDocuments: [], 
-      topSearches: [] 
-    }
-  }
+export async function updateDocumentMetadata(documentId: string, metadata: Record<string, any>): Promise<Document> {
+  return handleApiRequest<Document>(`/api/documents/${documentId}`, {
+    method: "PATCH",
+    body: metadata,
+  })
 }
 
 /**
- * Check API health
- *
- * @returns Health status object with service health indicators
- */
-export async function checkApiHealth(): Promise<{ 
-  pineconeApiHealthy: boolean | null; 
-  openaiApiHealthy: boolean | null; 
-  errors?: { 
-    pinecone?: string | null; 
-    openai?: string | null; 
-  } 
-}> {
-  try {
-    const response = await apiCall<{
-      success: boolean;
-      status: string;
-      services: Record<string, boolean>;
-      errors: {
-        pinecone: string | null;
-        openai: string | null;
-      }
-    }>("/api/health")
-
-    return {
-      pineconeApiHealthy: response?.services?.pinecone ?? null,
-      openaiApiHealthy: response?.services?.openai ?? null,
-      errors: response?.errors
-    }
-  } catch (error) {
-    console.error("Error checking API health:", error)
-    return { 
-      pineconeApiHealthy: false, 
-      openaiApiHealthy: false,
-      errors: {
-        pinecone: error instanceof Error ? error.message : "Unknown error",
-        openai: "Connection failed"
-      }
-    }
-  }
-}
-
-/**
- * Fetch conversations for a user
- *
- * @param userId User ID to fetch conversations for
- * @returns Array of conversations
- */
-export async function fetchConversations(userId: string): Promise<Conversation[]> {
-  try {
-    if (!userId) {
-      console.error("fetchConversations called without userId")
-      return []
-    }
-
-    const response = await apiCall<{ success: boolean; conversations: Conversation[] }>(
-      `/api/conversations?userId=${encodeURIComponent(userId)}`,
-    )
-
-    if (!response || !response.success || !response.conversations) {
-      console.warn("Received invalid response from conversations API", { response })
-      return []
-    }
-
-    return Array.isArray(response.conversations) ? response.conversations : []
-  } catch (error) {
-    console.error("Error fetching conversations:", error)
-    return []
-  }
-}
-
-/**
- * Create a new conversation
- *
- * @param userId User ID who owns the conversation
- * @param title Optional title for the conversation
- * @returns Created conversation
- */
-export async function createConversation(userId: string, title?: string): Promise<Conversation | null> {
-  try {
-    if (!userId) {
-      console.error("createConversation called without userId")
-      throw new Error("User ID is required")
-    }
-
-    const response = await apiCall<{ success: boolean; conversation: Conversation }>("/api/conversations", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        userId,
-        title: title || `Conversation ${new Date().toLocaleString()}`,
-      }),
-    })
-
-    if (!response || !response.success || !response.conversation) {
-      console.warn("Received invalid response from create conversation API", { response })
-      return null
-    }
-
-    return response.conversation
-  } catch (error) {
-    console.error("Error creating conversation:", error)
-    throw error
-  }
-}
-
-/**
- * Fetch messages for a conversation
- *
- * @param conversationId Conversation ID to fetch messages for
- * @returns Array of messages
- */
-export async function fetchMessages(conversationId: string): Promise<Message[]> {
-  try {
-    if (!conversationId) {
-      console.error("fetchMessages called without conversationId")
-      return []
-    }
-
-    const response = await apiCall<{ success: boolean; messages: Message[] }>(
-      `/api/chat/messages?conversationId=${encodeURIComponent(conversationId)}`,
-    )
-
-    if (!response || !response.success || !response.messages) {
-      console.warn("Received invalid response from messages API", { response })
-      return []
-    }
-
-    return Array.isArray(response.messages) ? response.messages : []
-  } catch (error) {
-    console.error("Error fetching messages:", error)
-    return []
-  }
-}
-
-/**
- * Send a message in a conversation
- *
- * @param conversationId Conversation ID to send message in
- * @param content Message content
- * @param userId User ID sending the message
- * @returns The AI message response
- */
-export async function sendMessage(
-  conversationId: string,
-  content: string,
-  userId: string
-): Promise<Message | null> {
-  try {
-    if (!conversationId) throw new Error("Conversation ID is required")
-    if (!userId) throw new Error("User ID is required")
-    if (!content || typeof content !== "string" || content.trim() === "") {
-      throw new Error("Message content cannot be empty")
-    }
-
-    const response = await apiCall<{ success: boolean; message: Message }>("/api/chat/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        conversationId,
-        userId,
-        content,
-      }),
-    })
-
-    if (!response || !response.success || !response.message) {
-      console.warn("Received invalid response from send message API", { response })
-      return null
-    }
-
-    return response.message
-  } catch (error) {
-    console.error("Error sending message:", error)
-    throw error
-  }
-}
-
-/**
- * Perform a search query
- *
- * @param userId User ID performing the search
- * @param query Search query
- * @param options Optional search options
+ * Searches documents
+ * @param userId - User ID
+ * @param options - Search options
  * @returns Search results
  */
-export async function performSearch(
+export async function searchDocuments(
   userId: string,
-  query: string,
-  options: SearchOptions = { type: "semantic" }
-): Promise<SearchResult[]> {
-  try {
-    if (!userId) throw new Error("User ID is required")
-    if (!query) throw new Error("Search query is required")
+  options: {
+    query: string
+    mode?: "semantic" | "keyword" | "hybrid"
+    filter?: Record<string, any>
+    sort?: { field: string; direction: "asc" | "desc" }
+    page?: number
+    pageSize?: number
+    includeHighlights?: boolean
+  },
+): Promise<SearchResults> {
+  const { query, mode = "semantic", filter, sort, page = 1, pageSize = 10, includeHighlights = true } = options
 
-    // Build search parameters
-    const searchParams = new URLSearchParams({
-      userId,
-      q: query,
-    })
-
-    // Add type parameter
-    if (options.type) {
-      searchParams.append("type", options.type)
-    }
-
-    // Add document type filters if present
-    if (options.documentTypes && Array.isArray(options.documentTypes)) {
-      options.documentTypes.forEach(type => {
-        searchParams.append("documentType", type)
-      })
-    }
-
-    // Add sort option if present
-    if (options.sortBy) {
-      searchParams.append("sortBy", options.sortBy)
-    }
-
-    // Add date range if present
-    if (options.dateRange) {
-      if (options.dateRange.from) {
-        searchParams.append("from", options.dateRange.from.toISOString())
-      }
-      if (options.dateRange.to) {
-        searchParams.append("to", options.dateRange.to.toISOString())
-      }
-    }
-
-    const response = await apiCall<{ success: boolean; results: SearchResult[] }>(
-      `/api/search?${searchParams.toString()}`
-    )
-
-    if (!response || !response.success) {
-      console.warn("Received invalid response from search API", { response })
-      return []
-    }
-
-    return Array.isArray(response.results) ? response.results : []
-  } catch (error) {
-    console.error("Error performing search:", error)
-    throw error
+  // Create URL with query parameters
+  const params: Record<string, any> = {
+    userId,
+    query,
+    mode,
+    page,
+    pageSize,
+    includeHighlights: includeHighlights.toString(),
   }
+
+  if (sort) {
+    params.sortField = sort.field
+    params.sortDirection = sort.direction
+  }
+
+  // Build request body for filters
+  const requestBody: Record<string, any> = { filter: filter || {} }
+
+  return handleApiRequest<SearchResults>("/api/search", {
+    method: "POST",
+    params,
+    body: requestBody,
+  })
+}
+
+// Conversation-related functions
+
+/**
+ * Fetches conversations
+ * @param userId - User ID
+ * @param options - Filter and pagination options
+ * @returns Conversation list response
+ */
+export async function fetchConversations(
+  userId: string,
+  options: {
+    filters?: Record<string, any>
+    pagination?: { limit: number; offset: number }
+  } = {},
+): Promise<Conversation[]> {
+  const { filters = {}, pagination = { limit: 10, offset: 0 } } = options
+
+  const params: Record<string, any> = {
+    userId,
+    limit: pagination.limit,
+    offset: pagination.offset,
+    ...filters,
+  }
+
+  return handleApiRequest<Conversation[]>("/api/conversations", {
+    method: "GET",
+    params,
+  })
+}
+
+/**
+ * Creates a new conversation
+ * @param userId - User ID
+ * @param title - Conversation title
+ * @param initialMessage - Optional initial message
+ * @returns Created conversation
+ */
+export async function createConversation(
+  userId: string,
+  title: string,
+  initialMessage?: string,
+): Promise<Conversation> {
+  return handleApiRequest<Conversation>("/api/conversations", {
+    method: "POST",
+    body: {
+      userId,
+      title,
+      initialMessage,
+    },
+  })
+}
+
+/**
+ * Updates a conversation
+ * @param id - Conversation ID
+ * @param updates - Updates to apply
+ * @returns Updated conversation
+ */
+export async function updateConversation(id: string, updates: Partial<Conversation>): Promise<Conversation> {
+  return handleApiRequest<Conversation>(`/api/conversations/${id}`, {
+    method: "PATCH",
+    body: updates,
+  })
+}
+
+/**
+ * Deletes a conversation
+ * @param id - Conversation ID
+ * @returns Success status
+ */
+export async function deleteConversation(id: string): Promise<boolean> {
+  const response = await handleApiRequest<{ success: boolean }>(`/api/conversations/${id}`, {
+    method: "DELETE",
+  })
+
+  return response.success
+}
+
+/**
+ * Fetches messages for a conversation
+ * @param conversationId - Conversation ID
+ * @param options - Pagination options
+ * @returns Message list
+ */
+export async function fetchMessages(
+  conversationId: string,
+  options: {
+    limit?: number
+    offset?: number
+    includeMetadata?: boolean
+  } = {},
+): Promise<Message[]> {
+  const { limit = 50, offset = 0, includeMetadata = false } = options
+
+  return handleApiRequest<Message[]>("/api/chat/messages", {
+    method: "GET",
+    params: {
+      conversationId,
+      limit,
+      offset,
+      includeMetadata: includeMetadata.toString(),
+    },
+  })
+}
+
+/**
+ * Sends a message in a conversation
+ * @param conversationId - Conversation ID
+ * @param content - Message content
+ * @param userId - User ID
+ * @returns Sent message
+ */
+export async function sendMessage(conversationId: string, content: string, userId: string): Promise<Message> {
+  return handleApiRequest<Message>("/api/chat/messages", {
+    method: "POST",
+    body: {
+      conversationId,
+      content,
+      userId,
+    },
+  })
+}
+
+// Analytics-related functions
+
+/**
+ * Fetches analytics data
+ * @param params - Analytics parameters
+ * @returns Analytics data
+ */
+export async function fetchAnalytics(params: Record<string, string> = {}): Promise<AnalyticsData> {
+  return handleApiRequest<AnalyticsData>("/api/analytics", {
+    method: "GET",
+    params,
+  })
+}
+
+/**
+ * Checks API health
+ * @returns Health check result
+ */
+export async function checkApiHealth(): Promise<HealthCheckResult> {
+  return handleApiRequest<HealthCheckResult>("/api/health", {
+    method: "GET",
+  })
+}
+
+// Additional utility functions
+
+/**
+ * Generates a pre-signed URL for direct file upload
+ * @param fileName - File name
+ * @param fileType - File MIME type
+ * @param userId - User ID
+ * @returns Pre-signed URL and upload ID
+ */
+export async function getUploadUrl(
+  fileName: string,
+  fileType: string,
+  userId: string,
+): Promise<{ uploadUrl: string; uploadId: string }> {
+  return handleApiRequest<{ uploadUrl: string; uploadId: string }>("/api/documents/upload-url", {
+    method: "POST",
+    body: {
+      fileName,
+      fileType,
+      userId,
+    },
+  })
+}
+
+/**
+ * Completes a direct upload
+ * @param uploadId - Upload ID
+ * @param userId - User ID
+ * @param metadata - Document metadata
+ * @returns Document
+ */
+export async function completeUpload(
+  uploadId: string,
+  userId: string,
+  metadata: Record<string, any> = {},
+): Promise<Document> {
+  return handleApiRequest<Document>("/api/documents/complete-upload", {
+    method: "POST",
+    body: {
+      uploadId,
+      userId,
+      metadata,
+    },
+  })
+}
+
+/**
+ * Fetches document processing status
+ * @param documentId - Document ID
+ * @returns Document processing status
+ */
+export async function getDocumentProcessingStatus(documentId: string): Promise<DocumentProcessingResponse> {
+  return handleApiRequest<DocumentProcessingResponse>(`/api/documents/${documentId}/status`, {
+    method: "GET",
+  })
+}
+
+/**
+ * Exports document data
+ * @param documentId - Document ID
+ * @param format - Export format
+ * @returns Export URL
+ */
+export async function exportDocument(
+  documentId: string,
+  format: "json" | "csv" | "txt" = "json",
+): Promise<{ exportUrl: string }> {
+  return handleApiRequest<{ exportUrl: string }>(`/api/documents/${documentId}/export`, {
+    method: "GET",
+    params: { format },
+  })
+}
+
+/**
+ * Fetches similar documents
+ * @param documentId - Document ID
+ * @param limit - Maximum number of results
+ * @returns Similar documents
+ */
+export async function getSimilarDocuments(documentId: string, limit = 5): Promise<Document[]> {
+  return handleApiRequest<Document[]>(`/api/documents/${documentId}/similar`, {
+    method: "GET",
+    params: { limit },
+  })
+}
+
+/**
+ * Submits feedback on search results
+ * @param searchId - Search ID
+ * @param resultId - Result ID
+ * @param feedback - Feedback type
+ * @param userId - User ID
+ * @param comments - Optional comments
+ * @returns Success status
+ */
+export async function submitSearchFeedback(
+  searchId: string,
+  resultId: string,
+  feedback: "relevant" | "not_relevant" | "partially_relevant",
+  userId: string,
+  comments?: string,
+): Promise<{ success: boolean }> {
+  return handleApiRequest<{ success: boolean }>("/api/search/feedback", {
+    method: "POST",
+    body: {
+      searchId,
+      resultId,
+      feedback,
+      userId,
+      comments,
+    },
+  })
 }

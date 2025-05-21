@@ -5,130 +5,126 @@ import type React from "react"
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { useAuth } from "@/hooks/use-auth"
+import { Mail, Lock, Loader2 } from "lucide-react"
 
+/**
+ * Simplified Login Page
+ */
 export default function LoginPage() {
+  const { login, user, isLoading, error, clearError } = useAuth()
+  const router = useRouter()
+
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
-  const [error, setError] = useState<string | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
-  const router = useRouter()
-  const { signInWithEmail, user, isLoading: authLoading } = useAuth()
+  const [formError, setFormError] = useState("")
 
-  // If user is already logged in, redirect to dashboard
+  // Redirect if already logged in
   useEffect(() => {
-    if (user && !authLoading) {
+    if (user) {
       router.push("/dashboard")
     }
-  }, [user, authLoading, router])
+  }, [user, router])
 
+  // Handle form submission
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setError(null)
+    clearError()
+    setFormError("")
 
-    // Validate inputs
-    if (!email || !email.includes("@")) {
-      setError("Please enter a valid email address")
+    // Basic validation
+    if (!email) {
+      setFormError("Email is required")
       return
     }
 
-    if (!password || password.length < 6) {
-      setError("Password must be at least 6 characters")
+    if (!password) {
+      setFormError("Password is required")
       return
     }
 
-    setIsLoading(true)
-
-    try {
-      const { error } = await signInWithEmail(email, password)
-
-      if (error) {
-        setError(error.message)
-        setIsLoading(false)
-        return
-      }
-
+    const success = await login(email, password)
+    if (success) {
       router.push("/dashboard")
-    } catch (err) {
-      setError("An unexpected error occurred. Please try again.")
-      console.error(err)
-      setIsLoading(false)
     }
-  }
-
-  // Don't show the login form while checking auth state
-  if (authLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
-      </div>
-    )
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        <div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">Sign in to Vector RAG Dashboard</h2>
-        </div>
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-          <div className="rounded-md shadow-sm -space-y-px">
-            <div>
-              <label htmlFor="email-address" className="sr-only">
-                Email address
-              </label>
+    <div className="flex min-h-full flex-1 flex-col justify-center px-6 py-12 lg:px-8">
+      <div className="sm:mx-auto sm:w-full sm:max-w-sm">
+        <h2 className="mt-6 text-center text-2xl font-bold leading-9 tracking-tight text-gray-900">
+          Sign in to RAG Dashboard
+        </h2>
+      </div>
+
+      <div className="mt-10 sm:mx-auto sm:w-full sm:max-w-sm">
+        <form className="space-y-6" onSubmit={handleSubmit}>
+          {/* Error message */}
+          {(error || formError) && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md" role="alert">
+              <p>{formError || error}</p>
+            </div>
+          )}
+
+          {/* Email field */}
+          <div>
+            <label htmlFor="email" className="block text-sm font-medium leading-6 text-gray-900">
+              Email address
+            </label>
+            <div className="relative mt-2">
+              <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                <Mail className="h-5 w-5 text-gray-400" aria-hidden="true" />
+              </div>
               <input
-                id="email-address"
+                id="email"
                 name="email"
                 type="email"
                 autoComplete="email"
-                required
-                className={`appearance-none rounded-none relative block w-full px-3 py-2 border ${
-                  error && !email ? "border-red-300" : "border-gray-300"
-                } placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm`}
-                placeholder="Email address"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                disabled={isLoading}
-              />
-            </div>
-            <div>
-              <label htmlFor="password" className="sr-only">
-                Password
-              </label>
-              <input
-                id="password"
-                name="password"
-                type="password"
-                autoComplete="current-password"
-                required
-                className={`appearance-none rounded-none relative block w-full px-3 py-2 border ${
-                  error && !password ? "border-red-300" : "border-gray-300"
-                } placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm`}
-                placeholder="Password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                className="block w-full rounded-md border-0 py-1.5 pl-10 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-blue-600 sm:text-sm sm:leading-6"
+                placeholder="you@example.com"
                 disabled={isLoading}
               />
             </div>
           </div>
 
-          {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md text-sm">{error}</div>
-          )}
+          {/* Password field */}
+          <div>
+            <label htmlFor="password" className="block text-sm font-medium leading-6 text-gray-900">
+              Password
+            </label>
+            <div className="relative mt-2">
+              <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                <Lock className="h-5 w-5 text-gray-400" aria-hidden="true" />
+              </div>
+              <input
+                id="password"
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="block w-full rounded-md border-0 py-1.5 pl-10 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-blue-600 sm:text-sm sm:leading-6"
+                placeholder="••••••••"
+                disabled={isLoading}
+              />
+            </div>
+          </div>
 
+          {/* Submit button */}
           <div>
             <button
               type="submit"
               disabled={isLoading}
-              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+              className="flex w-full justify-center items-center rounded-md bg-blue-600 px-3 py-1.5 text-sm font-semibold leading-6 text-white shadow-sm hover:bg-blue-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isLoading ? (
-                <div className="flex items-center">
-                  <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2"></div>
-                  Signing in...
-                </div>
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+                  <span>Signing in...</span>
+                </>
               ) : (
-                "Sign in"
+                <span>Sign in</span>
               )}
             </button>
           </div>

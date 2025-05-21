@@ -1,156 +1,113 @@
 /**
  * Navigation Component
  *
- * The main navigation component for the application. Provides navigation links
- * to different sections of the application and handles user authentication state.
- *
- * Features:
- * - Responsive design with mobile and desktop layouts
- * - Active link highlighting
- * - Sign out functionality
- * - Collapsible mobile menu
- *
- * Dependencies:
- * - next/link for client-side navigation
- * - next/navigation for pathname access
- * - lucide-react for icons
- * - @/hooks/use-auth for authentication
- * - @/components/toast for notifications
+ * Main navigation component for the application.
  */
 
 "use client"
 
-import type React from "react"
 import { useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { FileText, Menu, X, LogOut, User } from "lucide-react"
-import { useToast } from "./toast"
+import { Home, Search, FileText, MessageSquare, BarChart2, Settings, Menu, X, LogOut } from "lucide-react"
 import { useAuth } from "@/hooks/use-auth"
 
-interface NavigationItem {
-  name: string
-  href: string
-  icon: React.ElementType
+interface NavigationProps {
+  className?: string
 }
 
-// Updated navigation items to only include the dashboard
-const navigationItems: NavigationItem[] = [{ name: "Dashboard", href: "/dashboard", icon: FileText }]
-
-export function Navigation() {
+export function Navigation({ className = "" }: NavigationProps) {
+  const [isOpen, setIsOpen] = useState(false)
   const pathname = usePathname()
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
-  const { addToast } = useToast()
-  const { signOut } = useAuth()
+  const { logout, user } = useAuth()
+
+  const toggleMenu = () => {
+    setIsOpen(!isOpen)
+  }
+
+  const closeMenu = () => {
+    setIsOpen(false)
+  }
 
   const handleSignOut = async () => {
-    try {
-      await signOut()
-      addToast("Successfully signed out", "success")
-    } catch (error) {
-      addToast("Failed to sign out", "error")
-      console.error("Sign out error:", error)
-    }
+    await logout()
+  }
+
+  const navItems = [
+    { href: "/dashboard", label: "Dashboard", icon: Home },
+    { href: "/documents", label: "Documents", icon: FileText },
+    { href: "/search", label: "Search", icon: Search },
+    { href: "/chat", label: "Chat", icon: MessageSquare },
+    { href: "/analytics", label: "Analytics", icon: BarChart2 },
+    { href: "/settings", label: "Settings", icon: Settings },
+  ]
+
+  const isActive = (href: string) => {
+    return pathname === href || pathname?.startsWith(`${href}/`)
   }
 
   return (
     <>
-      {/* Desktop navigation */}
-      <nav className="hidden md:flex flex-col h-screen w-64 bg-gray-900 text-white p-4">
-        <div className="flex items-center mb-8 px-2">
-          <span className="text-xl font-bold">Vector RAG</span>
-        </div>
+      {/* Mobile menu button */}
+      <button
+        className="md:hidden fixed top-4 right-4 z-50 p-2 rounded-md bg-white shadow-md"
+        onClick={toggleMenu}
+        aria-label={isOpen ? "Close menu" : "Open menu"}
+      >
+        {isOpen ? <X size={24} /> : <Menu size={24} />}
+      </button>
 
-        <div className="flex flex-col flex-1">
-          <ul className="space-y-2">
-            {navigationItems.map((item) => {
-              const isActive = pathname === item.href || pathname?.startsWith(`${item.href}/`)
+      {/* Navigation sidebar */}
+      <nav
+        className={`fixed inset-y-0 left-0 z-40 w-64 bg-white shadow-lg transform transition-transform duration-300 ease-in-out ${
+          isOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
+        } ${className}`}
+      >
+        <div className="flex flex-col h-full">
+          {/* Logo/Header */}
+          <div className="p-4 border-b">
+            <h1 className="text-xl font-bold">RAG System</h1>
+            {user && <p className="text-sm text-gray-500 truncate">{user.email}</p>}
+          </div>
+
+          {/* Nav items */}
+          <ul className="flex-1 py-4">
+            {navItems.map((item) => {
+              const Icon = item.icon
+              const active = isActive(item.href)
+
               return (
-                <li key={item.name}>
+                <li key={item.href}>
                   <Link
                     href={item.href}
-                    className={`flex items-center px-4 py-3 rounded-md transition-colors ${
-                      isActive ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-800 hover:text-white"
+                    className={`flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 ${
+                      active ? "bg-blue-50 text-blue-600 font-medium border-r-4 border-blue-600" : ""
                     }`}
+                    onClick={closeMenu}
                   >
-                    <item.icon className="mr-3 h-5 w-5" />
-                    {item.name}
+                    <Icon size={20} className={`mr-3 ${active ? "text-blue-600" : "text-gray-500"}`} />
+                    {item.label}
                   </Link>
                 </li>
               )
             })}
           </ul>
-        </div>
 
-        <div className="mt-auto border-t border-gray-700 pt-4">
-          <Link
-            href="/dashboard"
-            className="flex items-center px-4 py-3 text-gray-300 hover:bg-gray-800 hover:text-white"
-          >
-            <User className="mr-3 h-5 w-5" />
-            Profile
-          </Link>
-          <button
-            onClick={handleSignOut}
-            className="flex items-center px-4 py-3 text-gray-300 hover:bg-gray-800 hover:text-white mt-2"
-          >
-            <LogOut className="mr-3 h-5 w-5" />
-            Sign Out
-          </button>
-        </div>
-      </nav>
-
-      {/* Mobile navigation */}
-      <nav className="md:hidden bg-gray-900 text-white p-4">
-        <div className="flex items-center justify-between mb-8">
-          <span className="text-xl font-bold">Vector RAG</span>
-          <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
-            {isMobileMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
-          </button>
-        </div>
-
-        {isMobileMenuOpen && (
-          <div className="flex flex-col">
-            <ul className="space-y-2">
-              {navigationItems.map((item) => {
-                const isActive = pathname === item.href || pathname?.startsWith(`${item.href}/`)
-                return (
-                  <li key={item.name}>
-                    <Link
-                      href={item.href}
-                      className={`flex items-center px-4 py-3 rounded-md transition-colors ${
-                        isActive ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-800 hover:text-white"
-                      }`}
-                      onClick={() => setIsMobileMenuOpen(false)}
-                    >
-                      <item.icon className="mr-3 h-5 w-5" />
-                      {item.name}
-                    </Link>
-                  </li>
-                )
-              })}
-            </ul>
-
-            <div className="mt-auto border-t border-gray-700 pt-4">
-              <Link
-                href="/dashboard"
-                className="flex items-center px-4 py-3 text-gray-300 hover:bg-gray-800 hover:text-white"
-                onClick={() => setIsMobileMenuOpen(false)}
-              >
-                <User className="mr-3 h-5 w-5" />
-                Profile
-              </Link>
-              <button
-                onClick={handleSignOut}
-                className="flex items-center px-4 py-3 text-gray-300 hover:bg-gray-800 hover:text-white mt-2"
-              >
-                <LogOut className="mr-3 h-5 w-5" />
-                Sign Out
-              </button>
-            </div>
+          {/* Footer/Sign out */}
+          <div className="p-4 border-t">
+            <button
+              onClick={handleSignOut}
+              className="flex items-center w-full px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-md"
+            >
+              <LogOut size={20} className="mr-3 text-gray-500" />
+              Sign Out
+            </button>
           </div>
-        )}
+        </div>
       </nav>
+
+      {/* Overlay for mobile */}
+      {isOpen && <div className="md:hidden fixed inset-0 z-30 bg-black bg-opacity-50" onClick={closeMenu} />}
     </>
   )
 }

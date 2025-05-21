@@ -1,68 +1,114 @@
-// utils/apiRequest.ts
+"use client"
 
 /**
  * API Request Utilities
  *
- * Provides consistent request handling for API routes.
+ * Provides utility functions for making API requests with consistent error handling.
+ *
+ * @module utils/apiRequest
  */
 
-import { NextResponse } from "next/server"
-import type { NextRequest } from "next/server"
-import { logger } from "@/lib/utils/logger"
+import { useAuth } from "@/hooks/use-auth"
 
 /**
- * Handle API request with consistent response format
+ * Handles API requests with consistent error handling
+ * @param endpoint - API endpoint
+ * @param options - Request options
+ * @returns Response data
  */
-export async function handleApiRequest<T>(handler: () => Promise<T>, request?: NextRequest): Promise<NextResponse> {
+export async function handleApiRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  // Get auth header if available
+  const auth = useAuth()
+  const headers = { ...options.headers } as Record<string, string>
+
+  // If we're in a client component, we can use the auth hook
+  if (typeof window !== "undefined") {
+    const authHeader = await auth.getAuthHeader()
+    if (authHeader) {
+      headers["Authorization"] = authHeader
+    }
+  }
+
   try {
-    const result = await handler()
+    const response = await fetch(endpoint, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        ...headers,
+      },
+    })
 
-    // Log successful request if request object is provided
-    if (request) {
-      logger.info(`API request successful`, {
-        path: request.nextUrl.pathname,
-        method: request.method,
-      })
-    }
+    if (!response.ok) {
+      let errorMessage = `Request failed with status: ${response.status}`
+      let errorData = null
 
-    // IMPROVED: Ensure we always return a valid JSON object with success flag
-    if (result === undefined || result === null) {
-      return NextResponse.json({ success: true })
-    }
-
-    // IMPROVED: Ensure the response always has a success property if not already present
-    if (typeof result === 'object' && result !== null && !('success' in result)) {
-      const responseWithSuccess = { 
-        ...result, 
-        success: true 
+      try {
+        errorData = await response.json()
+        if (errorData && errorData.error) {
+          errorMessage = errorData.error
+        }
+      } catch (e) {
+        // If we can't parse the error response, use the default message
       }
-      return NextResponse.json(responseWithSuccess)
+
+      throw new Error(errorMessage)
     }
 
-    return NextResponse.json(result)
+    const data = await response.json()
+    return data.data || data
   } catch (error) {
-    // Log error if request object is provided
-    if (request) {
-      logger.error(`API request failed`, {
-        path: request.nextUrl.pathname,
-        method: request.method,
-        error: error instanceof Error ? error.message : "Unknown error",
-      })
+    if (error instanceof Error) {
+      throw error
     }
-
-    return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 400 },
-    )
+    throw new Error("An unknown error occurred")
   }
 }
 
 /**
- * Validate required fields in request body
+ * Formats query parameters for URL
+ * @param params - Query parameters
+ * @returns Formatted query string
  */
-export function validateRequiredFields(body: any, fields: string[], context = "Request"): void {
-  const missingFields = fields.filter((field) => !body[field])
-  if (missingFields.length > 0) {
-    throw new Error(`${context}: Missing required fields: ${missingFields.join(", ")}`)
+export function formatQueryParams(params: Record<string, any>): string {
+  if (!params || Object.keys(params).length === 0) {
+    return ""
   }
+
+  const queryParams = new URLSearchParams()
+
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null) {
+      if (Array.isArray(value)) {
+        value.forEach((item) => queryParams.append(`${key}[]`, String(item)))
+      } else if (typeof value === "object" && value !== null) {
+        Object.entries(value).forEach(([subKey, subValue]) => {
+          if (subValue !== undefined && subValue !== null) {
+            queryParams.append(`${key}[${subKey}]`, String(subValue))
+          }
+        })
+      } else {
+        queryParams.append(key, String(value))
+      }
+    }
+  })
+
+  return queryParams.toString()
+}
+
+/**
+ * Builds a URL with query parameters
+ * @param endpoint - API endpoint
+ * @param params - Query parameters
+ * @returns Full URL with query parameters
+ */
+export function buildUrl(endpoint: string, params?: Record<string, any>): string {
+  if (!params || Object.keys(params).length === 0) {
+    return endpoint
+  }
+
+  const queryString = formatQueryParams(params)
+  const separator = endpoint.includes("?") ? "&" : "?"
+
+  return queryString ? `${endpoint}${separator}${queryString}` : endpoint
 }
